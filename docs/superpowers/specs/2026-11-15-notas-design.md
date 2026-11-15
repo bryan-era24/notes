@@ -106,7 +106,7 @@ Differences from Budget, each with its own decision record:
 
 | #   | Change                                                                             | Why                                                                                |
 | --- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| D1  | Service worker caching the app shell; system fonts instead of Google Fonts         | Must open offline (Budget LIM-009)                                                 |
+| D1  | Service worker caching the app shell; local fonts instead of Google Fonts          | Must open offline (Budget LIM-009)                                                 |
 | D2  | Access by business membership, not by user                                         | Up to 10 people share the same data                                                |
 | D3  | Money stored as integer centavos on the device and `numeric(12,2)` in the database | A point of sale must not be off by a cent (Budget LIM-012)                         |
 | D4  | Folios built from a device code plus a per-device counter                          | Unique numbers while offline on several devices                                    |
@@ -122,7 +122,8 @@ Paths follow Budget's `collection/id`. Ids are UUIDs made on the device. Every d
 Money is integer centavos. Weights are integer grams.
 
 ```
-settings/business   { name, phone, address, ticketFooter, deviceCode, nextFolio, windowDays }
+settings/business   { name, phone, address, ticketFooter }
+counters/<CODE>     { next }   (device letter, ticket width and printer are per-device preferences)
 products/<id>       { name, position, active,
                       presentations: [ { id, label, grams|null, price, active, position } ] }
 customers/<id>      { name, phone?, comment? }
@@ -160,9 +161,8 @@ Rules (all in the pure logic module):
   (0 < paid < total), Pagado (paid = total), Saldo a favor (paid > total).
 - **Folios.** Order folio = `deviceCode` + `-` + four-digit counter (`A-0042`); note number is its
   position in the order (`A-0042 / Nota 2`). The counter is advanced in the same write as the order.
-  The device code (one or two letters) is suggested on first run and editable in Ajustes; on first
-  connection it is checked against the server, and if taken a new one is chosen for future orders.
-  Folios are for people, not keys: existing folios never change.
+  The device letter (one or two letters, "A" by default) is set in Ajustes; each device should use its
+  own (LIM-009). Folios are for people, not keys: existing folios never change.
 - **History.** Every create, update, stage change, payment and delete writes one history document in
   the same write as the change, with `before` and `after`. History is never edited or deleted.
 
@@ -231,9 +231,8 @@ Two print layouts from the same data, with print CSS, chosen by the button press
 
 ## 9. Storage, modes and sync
 
-- **Store contract** as in Budget: `doc(path).set/update/delete/onSnapshot`,
-  `collection(name).onSnapshot`, `isEmpty`, `exportAll`, `importAll`, and `store.sync` in Connected
-  mode.
+- **Store contract** (simplified from Budget's): `get`, `list`, `set`, `batch`, `onChange`, `isEmpty`,
+  `exportAll`, `importAll(docs, "merge" | "replace")`, and `store.sync` in Connected mode.
 - **Lite**: all data in localStorage on the device. The window does **not** delete anything. When
   data outside the window takes space (or monthly), Ajustes offers "Exportar y limpiar": first a
   JSON download, then a second deliberate action removes documents older than the window. This keeps
@@ -279,16 +278,10 @@ server_updated_at)` table holding every device document as is (D7). One generic 
 
 Requirement prefixes: `CAT` catalog, `CLI` customers, `PED` orders, `NOT` notes, `PAG` payments,
 `PRO` production, `REP` reports, `IMP` printing and sharing, `SYN` storage, export and sync, `NFR`
-usability, accessibility, performance and privacy. Each requirement gets test cases `TC-<ID>-nn`;
-the full list goes in `docs/specs/` and `docs/testing/` when the plan is written.
+usability, accessibility, performance and privacy. Test titles carry case IDs `TC-<ID>-nn`
+(docs/TESTING.md lists the files).
 
-Phases, each one usable on its own:
-
-1. **Lite core**: catalog, customers, orders, notes, payments, stages, production view, letter and
-   ticket printing, share as text, export and import, service worker, history.
-2. **Reports** on device data.
-3. **Connected**: schema, sign-in, membership, sync, cache window, device codes, full-history
-   reports.
+All three planned phases (Lite core, reports, Connected) were built in one pass at Bryan's request.
 
 Tests: pure logic (totals, balances, payment status, kg and pieces, folios, validation) in
 `tests/logic.test.js`; flows in jsdom with the offline guard; print layouts checked by snapshot of

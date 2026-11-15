@@ -25,6 +25,30 @@ html = html.replace(
   /<script src="([^"]+)"><\/script>/g,
   (_, src) => `<script>\n${read(src).replace(/<\/script/gi, "<\\/script")}\n</script>`
 );
+// The preview frame refuses window.print and downloads: show the print layout on screen instead, with a close button.
+const PREVIEW = `<style>
+body[data-preview-print] #print-root { display: block; position: fixed; inset: 0; z-index: 50; overflow: auto; background: #fff; padding: 56px 16px 16px; }
+body[data-preview-print] .app { display: none; }
+#preview-close { position: fixed; top: 8px; right: 8px; z-index: 51; }
+</style>
+<script>
+(function () {
+  window.print = function () {
+    document.body.setAttribute("data-preview-print", "1");
+    var b = document.createElement("button");
+    b.id = "preview-close";
+    b.className = "primary";
+    b.textContent = "Cerrar vista de impresión";
+    b.onclick = function () {
+      document.body.removeAttribute("data-preview-print");
+      b.remove();
+      window.dispatchEvent(new Event("afterprint"));
+    };
+    document.body.appendChild(b);
+  };
+})();
+</script>`;
+html = html.replace("</body>", PREVIEW + "\n</body>");
 fs.writeFileSync(path.join(dist, "notas-preview.html"), html);
 
 const web = path.join(dist, "notas-web");
