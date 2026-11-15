@@ -7,6 +7,7 @@ window.NT = window.NT || {};
 NT.config = {
   storageKey: "notas:v1",
   windowDays: 30,
+  pollMs: 90000,
   ticketWidth: 80,
   defaultDeviceCode: "A",
   fallbackLang: "es",

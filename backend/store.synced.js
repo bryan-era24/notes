@@ -24,6 +24,10 @@ NT.backends.synced = function (config) {
         return NT.connection.settings().windowDays;
       },
       today: NT.clock.today,
+      pollMs: (NT.config && NT.config.pollMs) || 90000,
+      isActive: function () {
+        return typeof document === "undefined" || document.visibilityState !== "hidden";
+      },
     });
     opened.store.sync = engine.api;
     opened.store.engine = opened.engine;

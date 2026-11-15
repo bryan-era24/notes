@@ -42,7 +42,7 @@ and `sync` in Connected mode. Backups: `{ app: "notas", schemaVersion: 1, export
 Device first; every change marks its path pending in the same write. One sync: first-connection setup (upload, download or ask),
 push in chunks of 100 (a refused chunk is retried one by one and refused documents are flagged), pull rows changed since the cursor
 whose `doc_date` is null or inside the window, then drop non-pending documents whose window date is before `today − windowDays`.
-Orders, their notes and payments share one window date (the later of made and delivery). Runs 1.5 s after a change, on open, on
+Orders, their notes and payments share one window date (the later of made and delivery). Runs 1.5 s after a change, every 90 s while the app is open and visible (decision 0012), on open, on
 `online`, when visible, and from "Sincronizar ahora"; retries from 15 s doubling to 5 min. States: idle, syncing, offline,
 signed-out, needs-business, needs-schema, needs-choice, error. Full-history reports read a period with `fetchRange` without storing it.
 

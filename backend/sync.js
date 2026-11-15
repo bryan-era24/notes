@@ -32,7 +32,8 @@ NT.sync = (function () {
 
   /**
    * core: the local core from NT.openLocalStore. remote: an NT.remote client.
-   * options: { session(), businessId(), windowDays(), now() -> Date, today() -> "YYYY-MM-DD", setTimeout, clearTimeout }
+   * options: { session(), businessId(), windowDays(), now() -> Date, today() -> "YYYY-MM-DD", setTimeout, clearTimeout,
+   *            pollMs?: check for other devices' changes this often after a sync, isActive?() -> false while the app is hidden }
    */
   function create(core, remote, options) {
     var now =
@@ -104,10 +105,16 @@ NT.sync = (function () {
       schedule(DEBOUNCE_MS);
     }
 
-    function schedule(ms) {
+    var timerDue = 0;
+    /** Runs a sync after `ms`. With soonerOnly, an earlier sync already waiting is kept (a check never delays a pending send). */
+    function schedule(ms, soonerOnly) {
+      var due = now().getTime() + ms;
+      if (timer && soonerOnly && timerDue <= due) return;
       if (timer) clearTimer(timer);
+      timerDue = due;
       timer = setTimer(function () {
         timer = null;
+        timerDue = 0;
         syncNow();
       }, ms);
     }
@@ -338,6 +345,8 @@ NT.sync = (function () {
             if (done) {
               retryMs = RETRY_MIN_MS;
               setPhase("idle");
+              // While the app is open and visible, check again for other devices' changes (decision 0012).
+              if (options.pollMs && (!options.isActive || options.isActive())) schedule(options.pollMs, true);
             }
             return status();
           },

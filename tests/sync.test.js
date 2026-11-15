@@ -340,3 +340,45 @@ test("[TC-EXP-03-01] the complete export reads every document from the server, d
   assert.equal(all["orders/" + fresh].customerName, "Pendiente", "pending local order included");
   assert.equal(a.store.get("orders/" + old), undefined, "nothing stored on the device");
 });
+
+test("[TC-SYN-09-01] while the app is open and visible, it checks for other devices' changes every 90 seconds; a pending change is never delayed by it", async () => {
+  const server = await createFakeSupabase();
+  const a = await owner(server);
+  await a.repo.saveCustomer(null, { name: "Ana" });
+  await a.sync().syncNow();
+  const b = await member(server, a.membership.join_code);
+  // A device whose timers we can see and run.
+  const timers = [];
+  let visible = true;
+  const engine = b.NT.sync.create(b.core, b.NT.connection.remote(), {
+    session: b.NT.connection.session,
+    businessId: () => b.NT.connection.settings().businessId,
+    windowDays: () => 30,
+    now: () => new Date(),
+    today: () => "2026-11-15",
+    pollMs: 90000,
+    isActive: () => visible,
+    setTimeout: (fn, ms) => (timers.push({ fn, ms }), timers.length),
+    clearTimeout: (id) => (timers[id - 1] = null),
+  });
+  const due = () => timers.filter(Boolean).map((t) => t.ms);
+  await engine.api.syncNow();
+  assert.deepEqual(due(), [90000], "next check scheduled");
+  // A changes something; B picks it up on its next check without anyone touching B.
+  const c2 = await a.repo.saveCustomer(null, { name: "Luis" });
+  await a.sync().syncNow();
+  const next = timers.filter(Boolean).pop();
+  timers.length = 0;
+  await next.fn();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(b.store.get("customers/" + c2).name, "Luis");
+  // A local change right before a check: its 1.5 s send is not pushed back to 90 s.
+  timers.length = 0;
+  engine.recordChanges({}, [{ path: "customers/x", op: "upsert" }]);
+  assert.deepEqual(due(), [1500]);
+  // Hidden app: no polling.
+  visible = false;
+  timers.length = 0;
+  await engine.api.syncNow();
+  assert.deepEqual(due(), []);
+});

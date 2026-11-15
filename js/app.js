@@ -15,7 +15,7 @@ NT.app = (function () {
   var esc = NT.print.escape;
   var L = NT.logic;
   var money = L.formatMoney;
-  var VERSION = "1.2.0";
+  var VERSION = "1.3.0";
 
   var store = null,
     backup = null,
