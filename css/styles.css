@@ -1,0 +1,850 @@
+/*
+ * Purpose: All on-screen styling: the order-pad look (blue rules, red folio), large touch targets and readable type for an older seller.
+ * Responsibilities: Define the colour and type tokens and style every view from them; phones get one column and bottom tabs, tablets and
+ * computers a side rail and wider content. It must not hard-code a colour outside :root and does not style printing (css/print.css).
+ */
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  src: url("../fonts/atkinson-hyperlegible-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  src: url("../fonts/atkinson-hyperlegible-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  --desk: #eef3f7; /* the pale blue of a remission pad */
+  --sheet: #ffffff;
+  --ink: #1a2433; /* ballpoint blue-black */
+  --ink-soft: #4a5a70;
+  --rule: #c9d6e2;
+  --rule-strong: #93a8bd;
+  --folio: #b3261e; /* the printed red folio number */
+  --pen: #1f4fbf; /* actions: ballpoint blue */
+  --pen-soft: #e3eafa;
+  --ok: #1e7a46;
+  --ok-soft: #e1f2e8;
+  --warn: #8a4b00;
+  --warn-soft: #fbefdc;
+  --font: "Atkinson Hyperlegible", "Verdana", system-ui, sans-serif;
+  --size-body: 1.1875rem; /* 19px */
+  --size-small: 1rem;
+  --size-h1: 1.75rem;
+  --size-h2: 1.375rem;
+  --size-big: 2rem;
+  --tap: 3.5rem; /* 56px minimum touch target */
+  --radius: 10px;
+  --gap: 1rem;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+[hidden] {
+  display: none !important;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  background: var(--desk);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--size-body);
+  line-height: 1.45;
+}
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  margin: 0 0 0.5rem;
+}
+h1 {
+  font-size: var(--size-h1);
+}
+h2 {
+  font-size: var(--size-h2);
+}
+h3 {
+  font-size: var(--size-body);
+}
+p {
+  margin: 0 0 0.75rem;
+}
+a {
+  color: var(--pen);
+}
+.num,
+.money,
+.folio {
+  font-variant-numeric: tabular-nums;
+}
+:focus-visible {
+  outline: 3px solid var(--pen);
+  outline-offset: 2px;
+}
+
+.skip {
+  position: absolute;
+  left: -999px;
+}
+.skip:focus {
+  left: 1rem;
+  top: 1rem;
+  z-index: 10;
+  background: var(--sheet);
+  padding: 0.5rem 1rem;
+}
+
+/* ---------- layout ---------- */
+.app {
+  min-height: 100vh;
+  padding-bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--ink);
+  color: var(--sheet);
+  padding: calc(0.6rem + env(safe-area-inset-top, 0px)) 1rem 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+}
+.brand {
+  color: var(--sheet);
+  font-weight: 700;
+  font-size: 1.25rem;
+  text-decoration: none;
+}
+.sync {
+  margin: 0;
+  font-size: var(--size-small);
+  color: #cfdbe8;
+}
+.sync[data-tone="warn"] {
+  color: #ffd79a;
+}
+.view {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1rem;
+  outline: none;
+}
+.tabs {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  background: var(--sheet);
+  border-top: 1px solid var(--rule-strong);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.tabs a {
+  min-height: 4.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+.tabs svg {
+  width: 1.75rem;
+  height: 1.75rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.tabs a[aria-current="page"] {
+  color: var(--pen);
+  box-shadow: inset 0 3px 0 var(--pen);
+}
+
+@media (min-width: 900px) {
+  .app {
+    padding-bottom: 0;
+    padding-left: 7.5rem;
+  }
+  .tabs {
+    inset: 0 auto 0 0;
+    width: 7.5rem;
+    grid-template-columns: 1fr;
+    grid-auto-rows: 5.5rem;
+    align-content: start;
+    padding-top: 4.5rem;
+    border-top: 0;
+    border-right: 1px solid var(--rule-strong);
+  }
+  .tabs a[aria-current="page"] {
+    box-shadow: inset 4px 0 0 var(--pen);
+  }
+  .view {
+    max-width: 60rem;
+    padding: 1.5rem 2rem;
+  }
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+  }
+  .split > .sticky {
+    position: sticky;
+    top: 5rem;
+  }
+}
+
+/* ---------- controls ---------- */
+button,
+.btn,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button,
+.btn {
+  min-height: var(--tap);
+  padding: 0.5rem 1.1rem;
+  border-radius: var(--radius);
+  border: 2px solid var(--pen);
+  background: var(--sheet);
+  color: var(--pen);
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  text-align: center;
+  touch-action: manipulation;
+}
+button:active,
+.btn:active {
+  transform: translateY(1px);
+}
+.primary {
+  background: var(--pen);
+  color: var(--sheet);
+}
+.big {
+  width: 100%;
+  min-height: 4rem;
+  font-size: 1.3rem;
+}
+.quiet {
+  border-color: var(--rule-strong);
+  color: var(--ink);
+}
+.danger {
+  border-color: var(--folio);
+  color: var(--folio);
+}
+.danger.primary {
+  background: var(--folio);
+  color: var(--sheet);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+.row.stretch > * {
+  flex: 1 1 10rem;
+}
+.stack > * + * {
+  margin-top: 0.75rem;
+}
+
+label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+}
+.hint {
+  font-size: var(--size-small);
+  color: var(--ink-soft);
+}
+input[type="text"],
+input[type="search"],
+input[type="tel"],
+input[type="email"],
+input[type="password"],
+input[type="url"],
+input[type="number"],
+input[type="date"],
+input:not([type]),
+select,
+textarea {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0.5rem 0.8rem;
+  border: 2px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--sheet);
+}
+textarea {
+  min-height: 5rem;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--pen);
+}
+.field + .field {
+  margin-top: 0.9rem;
+}
+
+/* Choice chips: big buttons instead of dropdowns. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.chips button {
+  border-color: var(--rule-strong);
+  color: var(--ink);
+  font-weight: 400;
+}
+.chips button[aria-pressed="true"] {
+  border-color: var(--pen);
+  background: var(--pen-soft);
+  color: var(--ink);
+  font-weight: 700;
+}
+.chips.small button {
+  min-height: 2.9rem;
+  padding: 0.3rem 0.75rem;
+  font-size: var(--size-small);
+}
+
+/* ---------- sheets and the order pad ---------- */
+.sheet {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.sheet + .sheet,
+.sheet + section,
+section + .sheet,
+section + section {
+  margin-top: 1.25rem;
+}
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1.5rem 0 0.6rem;
+}
+.section-head h2 {
+  margin: 0;
+}
+.folio {
+  color: var(--folio);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.pad {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.pad-head {
+  padding: 1rem;
+  border-bottom: 2px solid var(--rule-strong);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 1rem;
+}
+.pad-head .folio {
+  font-size: var(--size-big);
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+}
+.pad-head h1 {
+  margin: 0;
+}
+.ruled > * {
+  border-bottom: 1px solid var(--rule);
+  padding: 0.7rem 1rem;
+}
+.ruled > *:last-child {
+  border-bottom: 0;
+}
+
+/* Order list rows look like the stubs of a numbered pad. */
+.stubs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.stubs li + li {
+  border-top: 1px solid var(--rule);
+}
+.stub {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr auto;
+  gap: 0.15rem 0.75rem;
+  padding: 0.85rem 1rem;
+  color: var(--ink);
+  text-decoration: none;
+  min-height: var(--tap);
+  align-items: baseline;
+}
+.stub .folio {
+  grid-row: 1 / span 2;
+}
+.stub .who {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.stub .money {
+  font-weight: 700;
+  text-align: right;
+}
+.stub .meta {
+  grid-column: 2 / span 2;
+  font-size: var(--size-small);
+  color: var(--ink-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  justify-content: space-between;
+}
+.group-title {
+  font-size: var(--size-body);
+  margin: 1.25rem 0 0.5rem;
+  color: var(--ink-soft);
+}
+
+.pill {
+  display: inline-block;
+  padding: 0.05rem 0.55rem;
+  border-radius: 999px;
+  font-size: var(--size-small);
+  font-weight: 700;
+  border: 1.5px solid currentColor;
+  white-space: nowrap;
+}
+.pill.pending {
+  color: var(--folio);
+}
+.pill.partial {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.pill.paid,
+.pill.credit {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+
+.sums {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  padding: 1rem;
+  border-bottom: 2px solid var(--rule-strong);
+}
+.sums div {
+  display: flex;
+  flex-direction: column;
+}
+.sums span:first-child {
+  font-size: var(--size-small);
+  color: var(--ink-soft);
+}
+.sums .money {
+  font-size: clamp(1.05rem, 4.6vw, 1.5rem);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.sums .balance .money {
+  color: var(--folio);
+}
+.sums .balance.zero .money {
+  color: var(--ok);
+}
+
+.note-block .note-title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.note-block.cancelled .lines {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+.lines {
+  width: 100%;
+  border-collapse: collapse;
+}
+.lines td {
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+.lines td.num {
+  text-align: right;
+  white-space: nowrap;
+  padding-left: 0.75rem;
+}
+.lines tr:last-child td {
+  border-bottom: 0;
+}
+.subtotal {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 700;
+  border-top: 2px solid var(--rule-strong);
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+/* ---------- note editor ---------- */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr));
+  gap: 0.6rem;
+}
+.tile {
+  min-height: 5rem;
+  justify-content: flex-start;
+  text-align: left;
+  border-color: var(--rule-strong);
+  color: var(--ink);
+  font-size: 1.1rem;
+  line-height: 1.25;
+}
+.tile[aria-expanded="true"] {
+  border-color: var(--pen);
+  background: var(--pen-soft);
+}
+.presentations {
+  grid-column: 1 / -1;
+  background: var(--pen-soft);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+}
+.presentations .chips button {
+  background: var(--sheet);
+  min-width: 8rem;
+  flex-direction: column;
+  gap: 0;
+}
+.presentations .chips small {
+  font-weight: 400;
+}
+.draft-line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem 1rem;
+  align-items: center;
+}
+.draft-line .name {
+  font-weight: 700;
+}
+.stepper {
+  display: inline-grid;
+  grid-template-columns: var(--tap) 4.5rem var(--tap);
+  gap: 0.35rem;
+  align-items: center;
+}
+.stepper button {
+  padding: 0;
+  font-size: 1.6rem;
+}
+.stepper input {
+  text-align: center;
+  font-weight: 700;
+  font-size: 1.3rem;
+  padding: 0.25rem;
+}
+.draft-line .price-row {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.price-row input {
+  width: 8rem;
+  min-height: 2.9rem;
+}
+.price-row .line-total {
+  font-weight: 700;
+  font-size: 1.2rem;
+}
+.dock {
+  position: sticky;
+  bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
+  z-index: 4;
+  background: var(--ink);
+  color: var(--sheet);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.dock .money {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+.dock button {
+  border-color: var(--sheet);
+}
+@media (min-width: 900px) {
+  .dock {
+    bottom: 1rem;
+  }
+}
+.who-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.choices {
+  display: grid;
+  gap: 0.5rem;
+}
+.choices button {
+  justify-content: flex-start;
+  border-color: var(--rule-strong);
+  color: var(--ink);
+}
+.choices button[aria-pressed="true"] {
+  border-color: var(--pen);
+  background: var(--pen-soft);
+}
+
+/* ---------- production and reports ---------- */
+.make {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 1rem;
+}
+.make .weight {
+  font-size: var(--size-big);
+  font-weight: 700;
+  text-align: right;
+  line-height: 1.1;
+}
+.make .pieces {
+  text-align: right;
+  color: var(--ink-soft);
+}
+.make .pieces.weight {
+  color: var(--ink);
+}
+.pager {
+  display: grid;
+  grid-template-columns: var(--tap) 1fr var(--tap);
+  gap: 0.5rem;
+  align-items: center;
+  text-align: center;
+  margin: 1rem 0;
+}
+.pager button {
+  padding: 0;
+  font-size: 1.5rem;
+}
+.make ul {
+  grid-column: 1 / -1;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.make li {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px dashed var(--rule);
+  padding: 0.3rem 0;
+}
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+}
+.figure {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+}
+.figure .money {
+  display: block;
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+.figure.pending .money {
+  color: var(--folio);
+}
+.table-wrap {
+  overflow-x: auto;
+}
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--sheet);
+}
+table.data th,
+table.data td {
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+}
+table.data th {
+  font-size: var(--size-small);
+  color: var(--ink-soft);
+  border-bottom: 2px solid var(--rule-strong);
+}
+table.data .num {
+  text-align: right;
+  white-space: nowrap;
+}
+table.data .sub td {
+  color: var(--ink-soft);
+  font-size: var(--size-small);
+}
+.bar {
+  height: 0.6rem;
+  background: var(--pen);
+  border-radius: 3px;
+  min-width: 2px;
+}
+
+/* ---------- catalog and settings ---------- */
+.pres-edit {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  gap: 0.5rem;
+  align-items: end;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.pres-edit .row {
+  grid-column: 1 / -1;
+}
+@media (max-width: 520px) {
+  .pres-edit {
+    grid-template-columns: 1fr 1fr;
+  }
+  .pres-edit .field:first-child {
+    grid-column: 1 / -1;
+  }
+}
+.inactive {
+  color: var(--ink-soft);
+}
+details summary {
+  cursor: pointer;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+}
+.history li {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.code {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--folio);
+}
+.notice {
+  border-left: 4px solid var(--warn);
+  background: var(--warn-soft);
+  padding: 0.75rem 1rem;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.empty {
+  text-align: center;
+  padding: 2rem 1rem;
+}
+.empty .stack {
+  max-width: 24rem;
+  margin: 1rem auto 0;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  z-index: 9;
+  background: var(--ink);
+  color: var(--sheet);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  max-width: calc(100% - 2rem);
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+.toast button {
+  min-height: 2.75rem;
+  border-color: var(--sheet);
+  color: var(--sheet);
+  background: transparent;
+}
+@media (min-width: 900px) {
+  .toast {
+    bottom: 1.5rem;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: rise 0.18s ease-out;
+  }
+  @keyframes rise {
+    from {
+      transform: translate(-50%, 0.5rem);
+      opacity: 0;
+    }
+  }
+}

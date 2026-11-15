@@ -1,0 +1,246 @@
+/*
+ * Purpose: How a note looks on paper: letter pages and 58/80 mm tickets.
+ * Responsibilities: When printing, hide the app and show only #print-root; style the markup of js/print.js in black on white with thin
+ * rules and no fills, so it saves ink and reads well on a thermal printer. The page size itself is set by js/printers.js (#page-size).
+ */
+#print-root {
+  display: none;
+}
+@media print {
+  body {
+    background: #fff;
+  }
+  body[data-printing] .app,
+  body[data-printing] .skip {
+    display: none !important;
+  }
+  body[data-printing] #print-root {
+    display: block;
+  }
+}
+
+.print-doc {
+  color: #000;
+  background: #fff;
+  font-family: "Atkinson Hyperlegible", "Verdana", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+.print-doc h1 {
+  font-size: 18pt;
+  margin: 0;
+}
+.print-doc .contact {
+  margin: 2pt 0 0;
+}
+.print-doc .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2pt 18pt;
+  margin: 8pt 0 0;
+}
+.print-doc .meta div {
+  display: flex;
+  gap: 4pt;
+}
+.print-doc dt {
+  font-weight: 700;
+}
+.print-doc dt::after {
+  content: ":";
+}
+.print-doc dd {
+  margin: 0;
+}
+.print-doc h2 {
+  font-size: 12pt;
+  margin: 12pt 0 4pt;
+}
+.print-doc h3 {
+  font-size: 11pt;
+  margin: 0 0 3pt;
+}
+.print-doc .cancel-mark {
+  border: 1px solid #000;
+  padding: 0 4pt;
+}
+.print-doc .note.cancelled .lines,
+.print-doc .note.cancelled .tline {
+  text-decoration: line-through;
+}
+.print-doc .comment {
+  font-style: italic;
+  margin: 4pt 0;
+}
+.print-doc .footer {
+  text-align: center;
+  margin-top: 12pt;
+}
+.print-doc .pay-status {
+  margin: 4pt 0 0;
+}
+
+/* ---------- letter ---------- */
+.letter {
+  font-size: 11pt;
+  line-height: 1.35;
+}
+.letter-head .meta div:first-child dd {
+  font-weight: 700;
+  font-size: 13pt;
+}
+.letter-head {
+  border-bottom: 1.5pt solid #000;
+  padding-bottom: 8pt;
+}
+.letter .lines {
+  width: 100%;
+  border-collapse: collapse;
+}
+.letter .lines th,
+.letter .lines td {
+  border-bottom: 0.5pt solid #000;
+  padding: 3pt 4pt;
+  text-align: left;
+}
+.letter .lines th {
+  font-size: 9.5pt;
+  border-bottom-width: 1pt;
+}
+.letter .lines .num {
+  text-align: right;
+  white-space: nowrap;
+}
+.letter .lines tfoot td {
+  font-weight: 700;
+  border-bottom: 0;
+  text-align: right;
+}
+.letter .note-sum {
+  display: flex;
+  justify-content: space-between;
+}
+.letter .note {
+  break-inside: avoid;
+}
+.letter-end {
+  display: flex;
+  justify-content: space-between;
+  gap: 24pt;
+  margin-top: 14pt;
+  break-inside: avoid;
+}
+.letter .payments {
+  flex: 1;
+}
+.letter .payments ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.letter .payments li,
+.letter .totals div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12pt;
+}
+.letter .totals {
+  min-width: 200pt;
+  margin-left: auto;
+}
+.letter .totals .total,
+.letter .totals .balance {
+  font-weight: 700;
+}
+.letter .totals .balance {
+  font-size: 14pt;
+  border-top: 1pt solid #000;
+  margin-top: 3pt;
+  padding-top: 3pt;
+}
+.letter .signature {
+  margin-top: 40pt;
+  width: 60%;
+  break-inside: avoid;
+}
+.letter .signature span {
+  display: block;
+  border-bottom: 0.75pt solid #000;
+  height: 24pt;
+}
+.letter .signature p {
+  margin: 3pt 0 0;
+  font-size: 9.5pt;
+}
+
+/* ---------- ticket ---------- */
+.ticket {
+  width: 72mm;
+  padding: 2mm 3mm 6mm;
+  font-size: 10pt;
+  line-height: 1.3;
+}
+.ticket-58 {
+  width: 48mm;
+  font-size: 9pt;
+}
+.ticket .ticket-head {
+  text-align: center;
+  border-bottom: 1px dashed #000;
+  padding-bottom: 4pt;
+}
+.ticket h1 {
+  font-size: 14pt;
+}
+.ticket .meta {
+  display: block;
+  text-align: left;
+}
+.ticket .meta div {
+  justify-content: space-between;
+}
+.ticket h2 {
+  font-size: 10.5pt;
+  border-bottom: 1px dashed #000;
+  padding-bottom: 2pt;
+  margin-top: 6pt;
+}
+.ticket .tline {
+  margin: 3pt 0;
+}
+.ticket .calc,
+.ticket .tsub,
+.ticket .totals div,
+.ticket .payments li {
+  display: flex;
+  justify-content: space-between;
+  gap: 6pt;
+}
+.ticket .tsub {
+  font-weight: 700;
+  border-top: 1px dashed #000;
+  padding-top: 2pt;
+}
+.ticket .totals {
+  border-top: 1.5px solid #000;
+  margin-top: 6pt;
+  padding-top: 4pt;
+}
+.ticket .totals .total {
+  font-weight: 700;
+}
+.ticket .totals .balance {
+  font-weight: 700;
+  font-size: 13pt;
+}
+.ticket .pay-status {
+  text-align: center;
+  font-size: 11pt;
+}
+.ticket .payments ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ticket .payments h3 {
+  margin-top: 6pt;
+}

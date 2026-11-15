@@ -1,0 +1,21 @@
+{
+  "name": "notas",
+  "version": "1.0.0",
+  "description": "Order notes for a small point of sale: products with presentations, orders with notes, payments, production and reports. Offline first, optional Supabase sync.",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "test": "node --test \"tests/*.test.js\"",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "preview": "node scripts/build_preview.js"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "jsdom": "31.0.1",
+    "prettier": "3.10.1"
+  }
+}
