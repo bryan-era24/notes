@@ -52,7 +52,14 @@ signed-out, needs-business, needs-schema, needs-choice, error. Full-history repo
 `js/printers.js` prints through the browser (letter always; ticket by default) or sends `NT.escpos.encode` bytes over Web Bluetooth
 (chunks of 180 bytes), Web Serial (9600 baud) or Web USB (first bulk OUT endpoint). To support a chosen printer: test it with
 "Imprimir prueba"; if it needs a specific Bluetooth service, baud rate or code page, change it in `js/printers.js` / `js/escpos.js`.
-Sharing uses the Web Share API, else a WhatsApp link and copy; PDF is the browser's "Save as PDF" on the letter layout.
+Sharing uses the Web Share API, else a WhatsApp link and copy.
+
+PDF (decision 0014): `js/pdf.js` writes the letter note as a real PDF (US Letter, Helvetica and Helvetica-Bold with WinAnsiEncoding,
+black only, more pages when needed), named by `NT.logic.pdfFileName`: "cliente folio fecha.pdf" ("Sin nombre" without a customer,
+no date when there is none). The "PDF" button shares the file where the browser can share files (iPhone, Android) and downloads it
+elsewhere. On iPhone and iPad, "Imprimir hoja" goes through the PDF and the share sheet (which has "Imprimir"), because Safari stops
+opening the print dialog for a page after it is cancelled a few times. Browser printing sets the page title to the same name while
+printing, so "Guardar como PDF" proposes it.
 
 ## 6. Export (decision 0008)
 
@@ -88,3 +95,7 @@ their next open.
 ## 10. Diagnostics
 
 Levels off (default), error, warn, info, debug; memory only; redacted by key name (`js/log.js`). `?debug=debug` for one visit.
+The downloaded record starts with a header line: app version, browser family (`safari-ios`, `chrome-android`, ...; never the full
+user agent), installed or tab, and Lite or Connected with its storage engine. Each tap and form is logged at debug as `ui.tap` /
+`ui.submit` with the action and the screen; a refused change logs `ui.action_failed` with the action, the screen and the problem
+codes (`presentation.price`), never the values typed.

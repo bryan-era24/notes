@@ -1,6 +1,6 @@
 /*
  * Purpose: Diagnostics with levels, so problems can be traced on a phone without writing anything by default.
- * Responsibilities: Keep the current level (off by default), record entries at or below it in a bounded in-memory buffer and the console, and mask personal values before they are recorded. It is the only file allowed to use the console; it never persists entries and never sends them anywhere.
+ * Responsibilities: Keep the current level (off by default), record entries at or below it in a bounded in-memory buffer and the console, mask personal values before they are recorded, and start the downloaded record with a header line (version, browser, mode) that the app supplies. It is the only file allowed to use the console; it never persists entries and never sends them anywhere.
  */
 window.NT = window.NT || {};
 
@@ -15,6 +15,7 @@ NT.log = (function () {
     /^(amount|amounts|name|names|customerName|productName|phone|address|comment|price|unitPrice|total|paid|balance|lines|data|before|after|email|password|joinCode|join_code)$|token|secret|apikey|anonkey|authorization|key$/i;
 
   var level = LEVELS.off;
+  var header = null; // function returning a first line (app version, browser...) for the downloaded record
   var limit = DEFAULT_BUFFER;
   var buffer = [];
 
@@ -62,13 +63,24 @@ NT.log = (function () {
     if (typeof console !== "undefined" && typeof console[method] === "function") console[method]("[notas]", entry.event, entry.fields);
   }
 
-  /** The recorded entries, one line each, ready to download. */
+  /** The recorded entries, one line each, ready to download; first the header line when one was set. */
   function dump() {
-    return buffer
-      .map(function (e) {
-        return e.time + " " + e.level.toUpperCase() + " " + e.event + " " + JSON.stringify(e.fields);
-      })
-      .join("\n");
+    var head = "";
+    if (header)
+      try {
+        head = String(header()) + "\n";
+      } catch {
+        // catch-ok: a header that cannot be built leaves the record without it.
+        head = "";
+      }
+    return (
+      head +
+      buffer
+        .map(function (e) {
+          return e.time + " " + e.level.toUpperCase() + " " + e.event + " " + JSON.stringify(e.fields);
+        })
+        .join("\n")
+    );
   }
 
   return {
@@ -93,6 +105,10 @@ NT.log = (function () {
       return buffer.slice();
     },
     dump: dump,
+    /** Sets the function that writes the record's first line. It must return no personal data. */
+    setHeader: function (fn) {
+      header = typeof fn === "function" ? fn : null;
+    },
     clear: function () {
       buffer = [];
     },

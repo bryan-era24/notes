@@ -1,6 +1,6 @@
 /*
  * Purpose: Open the real index.html in a simulated browser (jsdom) for tests, with no network.
- * Responsibilities: Load the page's scripts from disk in their declared order, serve only the project files a test allows (and a fake database server when one is given), record console output, downloads and print calls, and fail loudly if anything else tries to reach the network. It is the only file allowed to require jsdom (tests/architecture.test.js).
+ * Responsibilities: Load the page's scripts from disk in their declared order, serve only the project files a test allows (and a fake database server when one is given), record console output, downloads and print calls (with the page title at that moment), and fail loudly if anything else tries to reach the network. It is the only file allowed to require jsdom (tests/architecture.test.js).
  */
 "use strict";
 const { JSDOM } = require("jsdom");
@@ -71,6 +71,7 @@ async function openApp({
       kind: window.document.body.getAttribute("data-printing"),
       html: window.document.getElementById("print-root").innerHTML,
       page: window.document.getElementById("page-size").textContent,
+      title: window.document.title,
     });
   Object.entries(storage).forEach(([key, value]) => window.localStorage.setItem(key, value));
 
