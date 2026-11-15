@@ -53,6 +53,7 @@ test("[TC-NFR-03-01] layers: storage, network, console, clock and randomness hav
     "\\bfetch\\(": ["backend/remote.js"],
     "console\\.": ["js/log.js"],
     "Math\\.random|crypto\\.": ["js/clock.js"],
+    "indexedDB\\.": ["backend/store.idb.js"],
   };
   for (const [pattern, allowed] of Object.entries(owners)) {
     const offenders = SOURCES.filter(
@@ -60,7 +61,7 @@ test("[TC-NFR-03-01] layers: storage, network, console, clock and randomness hav
     );
     assert.deepEqual(offenders, [], pattern + " used outside " + allowed.join(", "));
   }
-  for (const f of ["js/logic.js", "js/print.js", "js/escpos.js", "backend/rows.js"]) {
+  for (const f of ["js/logic.js", "js/print.js", "js/escpos.js", "backend/rows.js", "js/export.js"]) {
     const code = read(f).replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
     assert.doesNotMatch(code, /new Date\(\)|Date\.now|document\.|window\.(?!NT)|navigator|localStorage|fetch\(/, f + " must stay pure");
   }

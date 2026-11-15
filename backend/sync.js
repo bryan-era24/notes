@@ -52,10 +52,11 @@ NT.sync = (function () {
     function state() {
       return Object.assign(emptyState(), core.get(STATE) || {});
     }
+    /** Saves the sync state (and pulled documents) in one write. Returns a Promise. */
     function saveState(s, docs) {
       var internal = {};
       internal[STATE] = s;
-      core.apply(docs || {}, internal);
+      return core.apply(docs || {}, internal);
     }
     function status() {
       var s = state();
@@ -141,8 +142,9 @@ NT.sync = (function () {
           NT.log.info("sync.setup_needs_choice", {});
           return false;
         }
-        saveState(s);
-        return true;
+        return saveState(s).then(function () {
+          return true;
+        });
       });
     }
 
@@ -158,7 +160,7 @@ NT.sync = (function () {
         if (failedPaths && failedPaths[path]) after.outbox[path] = Object.assign({}, entry, { failed: true });
         else delete after.outbox[path];
       });
-      saveState(after);
+      return saveState(after);
     }
 
     function sendChunk(entries, bid) {
@@ -169,42 +171,51 @@ NT.sync = (function () {
         if (!doc) gone.push(pair);
         else rows.push(NT.rows.toRow(pair[0], doc, bid, pair[1].at, core.get));
       });
-      if (gone.length) settle(gone);
       var live = entries.filter(function (pair) {
         return gone.indexOf(pair) < 0;
       });
-      if (!rows.length) return Promise.resolve(0);
-      return remote.upsert("documents", rows, NT.rows.KEY).then(
-        function () {
-          settle(live);
-          return live.length;
-        },
-        function (e) {
-          var refused = e.code === "http" && e.status >= 400 && e.status < 500 && !isMissingSchema(e);
-          if (!refused) throw e;
-          if (live.length === 1) {
-            // The server will never accept this version: keep it, flagged, until the person changes it again.
-            var failed = {};
-            failed[live[0][0]] = true;
-            settle(live, failed);
-            NT.log.error("sync.push_rejected", { path: live[0][0], status: e.status });
-            return 0;
-          }
-          // Find the refused ones by sending one at a time.
-          var sent = 0,
-            chain = Promise.resolve();
-          live.forEach(function (pair) {
-            chain = chain.then(function () {
-              return sendChunk([pair], bid).then(function (n) {
-                sent += n;
+      var cleared = gone.length ? settle(gone) : Promise.resolve();
+      if (!rows.length)
+        return cleared.then(function () {
+          return 0;
+        });
+      return cleared
+        .then(function () {
+          return remote.upsert("documents", rows, NT.rows.KEY);
+        })
+        .then(
+          function () {
+            return settle(live).then(function () {
+              return live.length;
+            });
+          },
+          function (e) {
+            var refused = e.code === "http" && e.status >= 400 && e.status < 500 && !isMissingSchema(e);
+            if (!refused) throw e;
+            if (live.length === 1) {
+              // The server will never accept this version: keep it, flagged, until the person changes it again.
+              var failed = {};
+              failed[live[0][0]] = true;
+              NT.log.error("sync.push_rejected", { path: live[0][0], status: e.status });
+              return settle(live, failed).then(function () {
+                return 0;
+              });
+            }
+            // Find the refused ones by sending one at a time.
+            var sent = 0,
+              chain = Promise.resolve();
+            live.forEach(function (pair) {
+              chain = chain.then(function () {
+                return sendChunk([pair], bid).then(function (n) {
+                  sent += n;
+                });
               });
             });
-          });
-          return chain.then(function () {
-            return sent;
-          });
-        }
-      );
+            return chain.then(function () {
+              return sent;
+            });
+          }
+        );
     }
 
     function push(bid) {
@@ -287,8 +298,9 @@ NT.sync = (function () {
         latest.windowKey = s.windowKey;
         latest.lastSyncAt = now().toISOString();
         latest.lastError = null;
-        saveState(latest, docs);
-        NT.log.info("sync.pulled", counts);
+        return saveState(latest, docs).then(function () {
+          NT.log.info("sync.pulled", counts);
+        });
       });
     }
 
@@ -381,15 +393,13 @@ NT.sync = (function () {
         s.cursor = null;
         s.setup = "done";
         internal[STATE] = s;
-        core.apply(docs, internal);
         NT.log.info("sync.chose_server", { keptCopy: Object.keys(copy).length });
-      } else {
-        markAllPending(s);
-        s.setup = "done";
-        saveState(s);
-        NT.log.info("sync.chose_device", {});
+        return core.apply(docs, internal).then(syncNow);
       }
-      return syncNow();
+      markAllPending(s);
+      s.setup = "done";
+      NT.log.info("sync.chose_device", {});
+      return saveState(s).then(syncNow);
     }
 
     /**
@@ -424,6 +434,36 @@ NT.sync = (function () {
       });
     }
 
+    /**
+     * Every document of the business (deleted ones included) read from the server page by page without storing it, merged with this
+     * device's pending and newer documents. For the complete export. Resolves with { "collection/id": document }.
+     */
+    function fetchAll() {
+      var bid = options.businessId();
+      var out = {};
+      function page(after) {
+        var filters = [["business_id", "eq", bid]];
+        if (after) filters.push(["server_updated_at", "gt", after]);
+        return remote.select("documents", filters, "server_updated_at.asc", PAGE).then(function (rows) {
+          rows = rows || [];
+          rows.forEach(function (r) {
+            var pair = NT.rows.fromRow(r);
+            out[pair[0]] = pair[1];
+          });
+          if (rows.length === PAGE) return page(rows[rows.length - 1].server_updated_at);
+        });
+      }
+      return page(null).then(function () {
+        var pending = state().outbox;
+        core.paths().forEach(function (p) {
+          var local = core.get(p);
+          if (pending[p] || !out[p] || NT.rows.isNewer(local.updatedAt, out[p].updatedAt)) out[p] = local;
+        });
+        NT.log.info("sync.fetched_all", { documents: Object.keys(out).length });
+        return out;
+      });
+    }
+
     return {
       recordChanges: recordChanges,
       schedule: schedule,
@@ -432,6 +472,7 @@ NT.sync = (function () {
         choose: choose,
         status: status,
         fetchRange: fetchRange,
+        fetchAll: fetchAll,
         onStatus: function (fn) {
           listeners.push(fn);
         },

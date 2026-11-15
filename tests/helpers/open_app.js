@@ -25,8 +25,9 @@ function scriptPaths() {
  *   language navigator.language seen by the page
  *   remote   a fake database server (tests/helpers/fake_supabase.js); only its base URL is reachable
  *   query    the page's query string, for example "?debug=info"
+ *   indexedDB  an IndexedDB factory (fake-indexeddb) to give the page; without it the page uses localStorage
  */
-async function openApp({ storage = {}, files = [], extra = {}, language = "es-MX", remote = null, query = "" } = {}) {
+async function openApp({ storage = {}, files = [], extra = {}, language = "es-MX", remote = null, query = "", indexedDB = null } = {}) {
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   const dom = new JSDOM(html, { runScripts: "outside-only", pretendToBeVisual: true, url: "https://app.test/index.html" + query });
   const window = dom.window;
@@ -52,6 +53,7 @@ async function openApp({ storage = {}, files = [], extra = {}, language = "es-MX
 
   Object.defineProperty(window.navigator, "language", { value: language, configurable: true });
   window.scrollTo = () => {};
+  if (indexedDB) window.indexedDB = indexedDB;
   const prints = [];
   window.print = () =>
     prints.push({

@@ -18,11 +18,13 @@ backend/rows.js          PURE document <-> row mapping and window dates
 backend/sync.js          offline-first sync engine
 backend/connection.js    mode, server, session, business; sign-up/in, schema check, create/join business
 backend/store.js         store contract and backend selector
-backend/store.local.js   localStorage backend (atomic batches, fail closed)
+backend/store.local.js   the device store core (memory + queued atomic saves, fail closed), localStorage engine, engine choice
+backend/store.idb.js     IndexedDB engine and the one-time move from localStorage (only indexedDB user)
 backend/store.synced.js  local backend + sync engine
 backend/schema_sql.js    copy of db/schema.sql for the setup screen (generated)
 js/repo.js       the only writer: validation, stamps, history, folios, soft delete, restore
 js/demo.js       demonstration data
+js/export.js     PURE complete export: tables, CSV, ZIP, PostgreSQL script
 js/app.js        screens and actions; starts the app
 db/schema.sql    PostgreSQL schema for Connected mode
 ```

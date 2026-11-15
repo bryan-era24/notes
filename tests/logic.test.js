@@ -279,3 +279,42 @@ test("[TC-IMP-03-01] share text is plain and complete", () => {
   assert.match(text, /Saldo: \$875\.00/);
   assert.match(text, /Pendiente de pago/);
 });
+
+test("[TC-PED-04-01] search ignores accents and case, needs every word, and finds folios by their number", () => {
+  const order = { folio: "A-0042", customerName: "Doña Pérez", deliveryDate: "2026-11-20", comment: "Entregar en la escuela" };
+  const notes = [
+    { customerName: "Maestra Lupita", comment: "", lines: [{ productName: "Palomitas de caramelo", presentationLabel: "245 g" }] },
+    { customerName: "", deletedAt: "x", lines: [{ productName: "Charola secreta", presentationLabel: "x" }] },
+  ];
+  const text = L.searchText(order, notes, { phone: "33 1234 5678" });
+  const hit = (q) => L.matchesSearch(q, text);
+  assert.ok(hit("dona perez"));
+  assert.ok(hit("PÉREZ caramelo"));
+  assert.ok(hit("42"));
+  assert.ok(hit("a-42"));
+  assert.ok(hit("A-0042"));
+  assert.ok(hit("lupita"));
+  assert.ok(hit("escuela"));
+  assert.ok(hit("1234"));
+  assert.ok(hit("2026-11-20"));
+  assert.ok(hit(""));
+  assert.ok(!hit("perez mantequilla"), "every word must match");
+  assert.ok(!hit("charola"), "deleted notes are not searched");
+  assert.ok(!hit("4200"));
+});
+
+test("[TC-CAT-03-01] products ranked by how much they sold since a date", () => {
+  const notes = [
+    {
+      orderDate: "2026-11-10",
+      lines: [
+        { productId: "a", qty: 5 },
+        { productId: "b", qty: 50 },
+      ],
+    },
+    { orderDate: "2026-09-01", lines: [{ productId: "c", qty: 999 }] },
+    { orderDate: "2026-11-12", stage: "cancelled", lines: [{ productId: "c", qty: 999 }] },
+    { orderDate: "2026-11-12", lines: [{ productId: "a", qty: 60 }] },
+  ];
+  assert.deepEqual(L.productRanking(notes, "2026-10-01"), { a: 65, b: 50 });
+});

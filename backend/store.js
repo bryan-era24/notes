@@ -14,24 +14,31 @@
  *   store.exportAll()            { "collection/id": document }
  *   store.importAll(docs, mode)  mode "merge" | "replace"                            -> Promise<{ added, updated, kept }>
  *   store.sync                   Connected mode only (backend/sync.js): syncNow(), choose("server" | "device"), status(),
- *                                onStatus(fn), failedPaths(), fetchRange(from, to)
+ *                                onStatus(fn), failedPaths(), fetchRange(from, to), fetchAll()
  *
  * Collections: settings/business, counters/<deviceCode>, products, customers, orders, notes, payments, history (docs/TECHNICAL.md §1).
- * A backend that cannot start returns null (no storage) or { corrupt: true, raw } (unreadable data: the app stops and offers a download).
+ * Backends open asynchronously (IndexedDB). A backend that cannot start gives null (no storage), { corrupt: true, raw } (unreadable
+ * data: the app stops and offers a download) or { failed: "indexeddb" } (moved data that cannot be opened: the app stops).
  */
 window.NT = window.NT || {};
 NT.backends = NT.backends || {};
 
+/**
+ * Resolves with the store for this device's mode, null when data cannot be saved here, { corrupt: true, raw } for unreadable data,
+ * or { failed: "indexeddb" } when data moved to IndexedDB cannot be opened.
+ */
 NT.createStore = function () {
   "use strict";
   var connected = NT.connection && NT.connection.isConnected() && NT.backends.synced;
   var name = connected ? "synced" : "local";
   NT.log.info("store.create", { backend: name });
-  try {
-    return NT.backends[name](NT.config || {});
-  } catch (e) {
-    // catch-ok: a backend that cannot start means "no saving here"; the app then shows status.noStorage.
-    NT.log.error("store.create_failed", { backend: name, error: e });
-    return null;
-  }
+  return Promise.resolve()
+    .then(function () {
+      return NT.backends[name](NT.config || {});
+    })
+    .catch(function (e) {
+      // catch-ok: a backend that cannot start means "no saving here"; the app then shows status.noStorage.
+      NT.log.error("store.create_failed", { backend: name, error: e });
+      return null;
+    });
 };

@@ -167,3 +167,82 @@ test("[TC-SYN-01-05] unreadable stored data shows the fail-closed screen and is 
   assert.equal(await app.downloadText(0), "{broken");
   assert.equal(app.window.localStorage.getItem(STORAGE_KEY), "{broken");
 });
+
+test("[TC-SYN-08-06] with IndexedDB the orders are still there after closing and opening the app", async () => {
+  const { IDBFactory } = require("fake-indexeddb");
+  const idb = new IDBFactory();
+  const first = await openApp({ indexedDB: idb });
+  await first.waitFor(() => first.window.document.querySelector('[data-act="demoLoad"]'));
+  await first.click('[data-act="demoLoad"]');
+  await first.waitFor(() => first.window.document.querySelectorAll(".stub").length > 3, 6000);
+  assert.equal(first.window.localStorage.getItem(STORAGE_KEY), null, "nothing written to localStorage");
+  const second = await openApp({ indexedDB: idb });
+  await second.waitFor(() => second.window.document.querySelectorAll(".stub").length > 3, 6000);
+  assert.deepEqual(second.blocked, []);
+});
+
+test("[TC-PED-04-02] the order search finds by name without accents, by folio number and by product, and clears in one tap", async () => {
+  const app = await openApp();
+  await app.click('[data-act="demoLoad"]');
+  await app.waitFor(() => app.window.document.querySelectorAll(".stub").length > 3, 6000);
+  const results = () => [...app.window.document.querySelectorAll("#order-results .stub .folio")].map((e) => e.textContent);
+  app.$("order-search").focus();
+  await app.type("#order-search", "esquina");
+  assert.ok(results().length >= 1);
+  assert.ok(app.byText("#order-results .stub", /Esquina/));
+  await app.type("#order-search", "10");
+  assert.deepEqual(results(), ["A-0010"]);
+  await app.type("#order-search", "dona carmen");
+  assert.ok(results().length >= 1, "accents are optional");
+  await app.type("#order-search", "charola");
+  assert.ok(results().length >= 2, "searches products inside notes");
+  assert.equal(app.$("order-filters").hidden, true, "filters step aside while searching");
+  assert.equal(app.window.document.activeElement.id, "order-search", "typing keeps the focus");
+  await app.click('[data-act="clearSearch"]');
+  assert.equal(app.$("order-search").value, "");
+  assert.equal(app.$("order-filters").hidden, false);
+});
+
+test("[TC-REP-03-01] report sections fold and unfold one by one or all at once, and stay as left", async () => {
+  const app = await openApp();
+  await app.click('[data-act="demoLoad"]');
+  await app.waitFor(() => app.window.document.querySelectorAll(".stub").length > 3, 6000);
+  await app.go("#/reportes");
+  const folds = () => [...app.window.document.querySelectorAll("details[data-fold]")];
+  assert.ok(folds().length >= 4, "three sections plus products with several presentations");
+  assert.ok(
+    folds()
+      .filter((d) => d.classList.contains("report-section"))
+      .every((d) => d.open)
+  );
+  await app.click('[data-act="reportExpand"][data-v="0"]');
+  assert.ok(folds().every((d) => !d.open));
+  await app.click('[data-act="reportExpand"][data-v="1"]');
+  assert.ok(folds().every((d) => d.open));
+  const day = app.window.document.querySelector('details[data-fold="day"]');
+  day.open = false;
+  day.dispatchEvent(new app.window.Event("toggle"));
+  await app.go("#/pedidos");
+  await app.go("#/reportes");
+  assert.equal(app.window.document.querySelector('details[data-fold="day"]').open, false);
+  assert.equal(app.window.document.querySelector('details[data-fold="product"]').open, true);
+});
+
+test("[TC-EXP-04-01] Ajustes exports everything as a ZIP of CSVs and as a PostgreSQL script", async () => {
+  const app = await openApp();
+  await app.click('[data-act="demoLoad"]');
+  await app.waitFor(() => app.window.document.querySelectorAll(".stub").length > 3, 6000);
+  await app.go("#/ajustes");
+  await app.click('[data-act="exportCsv"]');
+  await app.waitFor(() => app.downloads.length === 1);
+  assert.match(app.downloads[0].name, /^notas-exportacion-\d{4}-\d{2}-\d{2}\.zip$/);
+  const bytes = new Uint8Array(await app.downloads[0].blob.arrayBuffer());
+  assert.deepEqual([...bytes.slice(0, 4)], [0x50, 0x4b, 0x03, 0x04]);
+  await app.waitFor(() => app.window.document.querySelector('[data-act="exportSql"]'));
+  await app.click('[data-act="exportSql"]');
+  await app.waitFor(() => app.downloads.length === 2);
+  const sql = await app.downloadText(1);
+  assert.match(sql, /create schema if not exists notas_export;/);
+  assert.match(sql, /insert into notas_export\.renglones/);
+  assert.match(app.text(), /Espacio usado/);
+});

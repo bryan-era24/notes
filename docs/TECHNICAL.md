@@ -16,10 +16,15 @@ orders/<id>         { folio, customerId|null, customerName, deliveryDate|null, s
 notes/<id>          { orderId, number, orderDate, customerId|null, customerName, deliveryDate|null, stage, comment, createdAt,
                       lines: [{ id, productId, presentationId, productName, presentationLabel, grams|null, unitPrice, qty }] }
 payments/<id>       { orderId, noteId|null, amount, method: cash|transfer|other, comment, paidAt, localDate, orderDate }
-history/<id>        { path, at, localDate, by, action: create|update|stage|payment|delete|restore, before, after }
+history/<id>        { path, at, localDate, by, action: create|update|stage|payment|delete|restore, changes: { field: [old, new] } | null,
+                      ref: { number | amount | folio | name } }      (entries before decision 0006 hold before/after copies)
 ```
 
-Internal: `_sync/state` (outbox, cursor, setup, window), `_sync/before-connect`, `_import/before`.
+Internal: `_sync/state` (outbox, cursor, setup, window), `_sync/before-connect`, `_import/before`, `_meta/moved`.
+
+Storage (decision 0007): IndexedDB database `notas`, object store `docs` keyed by path; localStorage key `notas:v1` when IndexedDB is
+missing. Writes are queued; each saves its changed paths and internal state in one transaction. `notas:v1:moved` marks a device whose
+data moved to IndexedDB. Measured: about 2.9 KB per typical order (one note of three lines, a payment, a stage change).
 
 ## 2. Rules (js/logic.js)
 
@@ -49,11 +54,26 @@ signed-out, needs-business, needs-schema, needs-choice, error. Full-history repo
 "Imprimir prueba"; if it needs a specific Bluetooth service, baud rate or code page, change it in `js/printers.js` / `js/escpos.js`.
 Sharing uses the Web Share API, else a WhatsApp link and copy; PDF is the browser's "Save as PDF" on the letter layout.
 
-## 6. Offline
+## 6. Export (decision 0008)
+
+`js/export.js` turns documents into eight tables (columns in `NT.exporter.COLUMNS`, the same as the `v_*` views): productos,
+presentaciones, clientes, pedidos (with total, pagado, saldo, estado_pago), notas, renglones (one per line, with importe, kg and
+`cuenta` = counts in sales), pagos, historial. Deleted rows are kept with `eliminado`. CSV: UTF-8 with BOM, commas, CRLF, pesos with
+two decimals, kg with three, times in UTC, text starting with = + - @ prefixed with an apostrophe. ZIP: stored (no compression), UTF-8
+names. SQL: `create schema if not exists notas_export`, one table per export table, upserts in chunks of 500, safe to run again.
+In Connected mode the export reads every document through `store.sync.fetchAll()`; offline it falls back to this device and says so.
+
+## 7. Search
+
+`NT.logic.searchText` + `matchesSearch`: accents and case ignored, every word must match, a number alone matches a folio number exactly
+("42" finds A-0042), four or more digits also match phones; searches folio, customer, phone, delivery date, comments, and the customers,
+products and presentations of notes that are not deleted. Product tiles in the note editor are ordered by pieces sold in the last 60 days.
+
+## 8. Offline
 
 `sw.js` caches the app files cache-first under `VERSION`. Bump `VERSION` on every release so devices pick up the new files on
 their next open.
 
-## 7. Diagnostics
+## 9. Diagnostics
 
 Levels off (default), error, warn, info, debug; memory only; redacted by key name (`js/log.js`). `?debug=debug` for one visit.

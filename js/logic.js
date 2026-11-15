@@ -351,6 +351,59 @@ NT.logic = (function () {
     };
   }
 
+  // ---------- search ----------
+
+  /** Lowercase, without accents, single spaces: "Doña  PÉREZ" -> "dona perez". */
+  function normalize(s) {
+    return String(s || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  /**
+   * The searchable text of an order: folio (also as "#42" and "a42"), customer and phone, delivery date, comments, and the customers,
+   * products and presentations of its notes that are not deleted.
+   */
+  function searchText(order, notes, customer) {
+    var folioText = String(order.folio || "");
+    var m = /^([A-Za-z]{1,2})-0*(\d+)$/.exec(folioText);
+    var parts = [folioText, order.customerName, order.deliveryDate, order.comment, customer && customer.phone];
+    if (m) parts.push("#" + m[2], m[1] + m[2], m[1] + "-" + m[2]);
+    (notes || []).filter(live).forEach(function (n) {
+      parts.push(n.customerName, n.comment);
+      (n.lines || []).forEach(function (l) {
+        parts.push(l.productName, l.presentationLabel);
+      });
+    });
+    var text = normalize(parts.filter(Boolean).join(" | "));
+    return " " + text + " " + text.replace(/\s/g, "") + " ";
+  }
+  /** Every word of the query must appear. A number alone matches a folio number exactly ("42" finds A-0042, not A-0420). */
+  function matchesSearch(query, text) {
+    var words = normalize(query).split(" ").filter(Boolean);
+    return words.every(function (w) {
+      if (/^\d+$/.test(w)) {
+        var n = String(parseInt(w, 10));
+        return text.indexOf("#" + n + " ") >= 0 || (w.length >= 4 && text.indexOf(w) >= 0);
+      }
+      return text.indexOf(w) >= 0 || text.indexOf(w.replace(/-0*(\d)/, "-$1")) >= 0;
+    });
+  }
+
+  /** { productId: pieces } sold in notes that count, made on or after `from` (order date). For putting best sellers first. */
+  function productRanking(notes, from) {
+    var out = {};
+    (notes || []).forEach(function (n) {
+      if (!counts(n) || !n.orderDate || n.orderDate < from) return;
+      (n.lines || []).forEach(function (l) {
+        out[l.productId] = (out[l.productId] || 0) + (Number(l.qty) || 0);
+      });
+    });
+    return out;
+  }
+
   // ---------- validation (keys are language keys of the problem) ----------
 
   function validateProduct(p) {
@@ -534,6 +587,10 @@ NT.logic = (function () {
     lineFrom: lineFrom,
     production: production,
     report: report,
+    normalize: normalize,
+    searchText: searchText,
+    matchesSearch: matchesSearch,
+    productRanking: productRanking,
     validateProduct: validateProduct,
     validateNote: validateNote,
     validateOrder: validateOrder,

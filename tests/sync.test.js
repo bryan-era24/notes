@@ -318,3 +318,25 @@ test("[TC-NFR-04-01] diagnostics at debug level never record names, amounts, ema
   assert.ok(dump.length > 0);
   assert.doesNotMatch(dump, /Ana Secreta|123456|ana@example|test-anon-key|access-/);
 });
+
+test("[TC-EXP-03-01] the complete export reads every document from the server, deleted and old ones included, and keeps newer local changes", async () => {
+  const server = await createFakeSupabase();
+  const a = await owner(server, { today: "2026-06-01" });
+  const s = a.sync();
+  const old = await a.repo.createOrder({ deliveryDate: "2026-06-02" });
+  const c = await a.repo.saveCustomer(null, { name: "Ana" });
+  await a.repo.remove("customers/" + c);
+  await s.syncNow();
+  a.clock.today = "2026-11-15";
+  await s.syncNow();
+  assert.equal(a.store.get("orders/" + old), undefined, "old order left the device");
+  server.offline = true;
+  const fresh = await a.repo.createOrder({ customerName: "Pendiente" });
+  await assert.rejects(s.fetchAll());
+  server.offline = false;
+  const all = await s.fetchAll();
+  assert.ok(all["orders/" + old], "old order exported from the server");
+  assert.ok(all["customers/" + c].deletedAt, "deleted customer exported and marked");
+  assert.equal(all["orders/" + fresh].customerName, "Pendiente", "pending local order included");
+  assert.equal(a.store.get("orders/" + old), undefined, "nothing stored on the device");
+});

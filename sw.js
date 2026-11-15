@@ -4,7 +4,7 @@
  * on the next open, never in the middle of editing). It never caches or touches requests to other origins (the database).
  */
 "use strict";
-var VERSION = "notas-1.0.0";
+var VERSION = "notas-1.1.0";
 var FILES = [
   "./",
   "index.html",
@@ -32,10 +32,12 @@ var FILES = [
   "backend/connection.js",
   "backend/store.js",
   "backend/store.local.js",
+  "backend/store.idb.js",
   "backend/store.synced.js",
   "backend/schema_sql.js",
   "js/repo.js",
   "js/demo.js",
+  "js/export.js",
   "js/app.js",
 ];
 

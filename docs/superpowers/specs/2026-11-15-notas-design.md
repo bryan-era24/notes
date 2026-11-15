@@ -312,7 +312,14 @@ the print markup and by hand on paper; schema and RLS on PGlite; sync against th
 - **Phone**: the static folder, ready for any HTTPS static host (GitHub Pages, Netlify, Cloudflare
   Pages). HTTPS is needed for install and offline use.
 
-## 14. Left to the builder
+## 14. Changes after approval (2026-11-15)
+
+Asked by Bryan after the first build: pagination and capacity, PostgreSQL integration and complete CSV export, a simpler search, and
+folding reports. Built as: IndexedDB storage (decision 0007), lighter history (0006), 40 orders per page with "Ver más", product search
+and best sellers first, complete export as CSV zip and SQL script plus readable v_* views in the database (0008), one search box that
+ignores accents and finds folios by number, and report sections that fold with "Expandir todo" / "Contraer todo".
+
+## 15. Left to the builder
 
 File and module names, exact colors and spacing within the visual rules above, sync timings (start
 from Budget's), the wording of each text, and the order of tasks inside each phase.

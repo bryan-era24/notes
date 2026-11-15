@@ -21,12 +21,25 @@ The interface is in Spanish (es-MX). Code, docs and stored field names are in En
 
 ## Modes
 
-- **Lite** (default): everything stays in this browser. Nothing is sent anywhere. Download a backup from time to time; "Descargar y
+- **Lite** (default): everything stays in this browser (IndexedDB: hundreds of MB; the app warns if space runs low). Nothing is sent anywhere. Download a backup from time to time; "Descargar y
   limpiar lo viejo" downloads a backup and then removes old orders from the device (it never removes anything by itself).
 - **Connected**: Ajustes > Base de datos. Create a free project at supabase.com, paste its URL and public (anon) key, and create an
   account. If the tables do not exist yet the app shows one screen: copy the SQL, open the project's SQL editor, paste, Run, and tap
   "Ya lo hice". The first person creates the business; others join with the six-letter code shown in Ajustes. Each device keeps the
   last 30 days (configurable) plus everything still to deliver; full history stays in the database and in Reportes.
+
+## Export
+
+Ajustes > Respaldo y exportación:
+
+- **Exportar todo para Excel (CSV en .zip)**: one CSV per table (productos, presentaciones, clientes, pedidos, notas, renglones, pagos,
+  historial), opens in Excel with accents. In Connected mode it reads the whole database, not only this device's 30 days.
+- **Exportar todo para PostgreSQL (.sql)**: a script that creates schema `notas_export` in any PostgreSQL and loads every row; it can
+  be run again to update.
+- **Descargar respaldo (JSON)**: to load the data back into the app.
+
+In Connected mode the same tables exist as views in the database (`v_pedidos`, `v_renglones`, ...) for DBeaver, pgAdmin or Power BI;
+see docs/DATABASE.md.
 
 ## Printing
 

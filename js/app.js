@@ -15,7 +15,7 @@ NT.app = (function () {
   var esc = NT.print.escape;
   var L = NT.logic;
   var money = L.formatMoney;
-  var VERSION = "1.0.0";
+  var VERSION = "1.1.0";
 
   var store = null,
     repo = null,
@@ -161,8 +161,9 @@ NT.app = (function () {
     if (location.hash === hash) render();
     else location.hash = hash;
   }
-  function download(name, text, type) {
-    var blob = new Blob([text], { type: type || "application/json" });
+  /** Saves text or bytes as a file on the device. */
+  function download(name, content, type) {
+    var blob = new Blob([content], { type: type || "application/json" });
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url;
@@ -214,6 +215,10 @@ NT.app = (function () {
       text = map[s.state] ? t(map[s.state], { n: s.pending }) : s.pending ? t("status.pending", { n: s.pending }) : t("status.synced");
       if (s.failed && s.state === "idle") text = t("status.failed", { n: s.failed });
       if (s.state !== "idle" && s.state !== "syncing") tone = "warn";
+    }
+    if (ui.spaceWarned) {
+      text = t("space.status");
+      tone = "warn";
     }
     el.textContent = text;
     el.setAttribute("data-tone", tone);
@@ -291,33 +296,126 @@ NT.app = (function () {
   }
 
   // ---------- orders list ----------
+  var PAGE_SIZE = 40;
+
   function ordersView() {
+    var html = '<div class="stack"><a class="btn primary big" href="#/nuevo">' + esc(t("orders.new")) + "</a>";
+    html +=
+      '<div class="searchbox"><label class="visually-hidden" for="order-search">' +
+      esc(t("common.search")) +
+      '</label><input id="order-search" type="search" enterkeyhint="search" autocomplete="off" data-input="search" value="' +
+      esc(ui.search) +
+      '" placeholder="' +
+      esc(t("orders.searchPlaceholder")) +
+      '" /><button type="button" class="quiet clear" data-act="clearSearch" aria-label="' +
+      esc(t("orders.clearSearch")) +
+      '"' +
+      (ui.search ? "" : " hidden") +
+      ">×</button></div>";
+    html +=
+      '<div class="chips" id="order-filters"' +
+      (ui.search.trim() ? " hidden" : "") +
+      ">" +
+      ["open", "balance", "all"]
+        .map(function (f) {
+          return (
+            '<button type="button" data-act="filter" data-v="' +
+            f +
+            '"' +
+            pressed(ui.filter === f) +
+            ">" +
+            esc(t("orders.filter." + f)) +
+            "</button>"
+          );
+        })
+        .join("") +
+      "</div></div>";
+    return html + '<div id="order-results" aria-live="polite">' + ordersResults() + "</div>";
+  }
+
+  function stubRow(r) {
+    return (
+      '<li><a class="stub" href="#/pedido/' +
+      encodeURIComponent(r.o.id) +
+      '"><span class="folio">' +
+      esc(r.o.folio) +
+      '</span><span class="who">' +
+      esc(r.o.customerName || t("orders.noCustomer")) +
+      '</span><span class="money">' +
+      money(r.s.total) +
+      '</span><span class="meta"><span>' +
+      esc(relDate(r.o.deliveryDate)) +
+      " · " +
+      esc(t("stage." + r.o.stage)) +
+      " · " +
+      esc(r.notes === 1 ? t("orders.oneNote") : t("orders.notesCount", { n: r.notes })) +
+      "</span>" +
+      pill(r.s.status) +
+      "</span></a></li>"
+    );
+  }
+
+  /** The list under the search box: search results across every order, or the filtered list grouped by delivery date. */
+  function ordersResults() {
     var snap = snapshot();
-    var q = ui.search.trim().toLowerCase();
-    var rows = snap.orders
-      .map(function (o) {
-        var s = L.orderSummary(snap.notesOf[o.id], snap.paysOf[o.id]);
-        return {
-          o: o,
-          s: s,
-          notes: snap.notesOf[o.id].filter(function (n) {
-            return n.stage !== "cancelled";
-          }).length,
-        };
-      })
-      .filter(function (r) {
-        if (
-          q &&
-          String(r.o.customerName || "")
-            .toLowerCase()
-            .indexOf(q) < 0 &&
-          String(r.o.folio).toLowerCase().indexOf(q) < 0
-        )
-          return false;
-        if (ui.filter === "open") return ["delivered", "received_signed", "cancelled"].indexOf(r.o.stage) < 0;
-        if (ui.filter === "balance") return r.o.stage !== "cancelled" && r.s.balance > 0;
-        return true;
-      });
+    var q = ui.search.trim();
+    if (!snap.orders.length) {
+      var noCatalog = !products().length;
+      return (
+        '<div class="empty"><p>' +
+        esc(t("orders.empty")) +
+        "</p>" +
+        (noCatalog ? "<p>" + esc(t("orders.emptyCatalog")) + "</p>" : "") +
+        '<div class="stack">' +
+        (noCatalog ? '<a class="btn" href="#/producto/nuevo">' + esc(t("catalog.addProduct")) + "</a>" : "") +
+        '<button type="button" class="quiet" data-act="demoLoad">' +
+        esc(t("orders.tryDemo")) +
+        "</button></div></div>"
+      );
+    }
+    var phones = {};
+    customers().forEach(function (c) {
+      phones[c.id] = c;
+    });
+    var rows = snap.orders.map(function (o) {
+      return {
+        o: o,
+        s: L.orderSummary(snap.notesOf[o.id], snap.paysOf[o.id]),
+        notes: snap.notesOf[o.id].filter(function (n) {
+          return n.stage !== "cancelled";
+        }).length,
+      };
+    });
+    var shown = ui.shown || PAGE_SIZE;
+    var more = function (total) {
+      return total > shown
+        ? '<button type="button" class="quiet big" data-act="showMore">' +
+            esc(t("orders.showMore", { n: Math.min(PAGE_SIZE, total - shown), left: total - shown })) +
+            "</button>"
+        : "";
+    };
+
+    if (q) {
+      var found = rows
+        .filter(function (r) {
+          return L.matchesSearch(q, L.searchText(r.o, snap.notesOf[r.o.id], phones[r.o.customerId]));
+        })
+        .sort(function (a, b) {
+          var da = a.o.deliveryDate || a.o.localDate || "",
+            db = b.o.deliveryDate || b.o.localDate || "";
+          return da < db ? 1 : da > db ? -1 : String(b.o.folio).localeCompare(String(a.o.folio));
+        });
+      var head = '<p class="hint">' + esc(found.length === 1 ? t("orders.foundOne") : t("orders.found", { n: found.length })) + "</p>";
+      if (!found.length) return head + '<p class="empty">' + esc(t("orders.notFound")) + "</p>";
+      return head + '<ul class="stubs">' + found.slice(0, shown).map(stubRow).join("") + "</ul>" + more(found.length);
+    }
+
+    rows = rows.filter(function (r) {
+      if (ui.filter === "open") return ["delivered", "received_signed", "cancelled"].indexOf(r.o.stage) < 0;
+      if (ui.filter === "balance") return r.o.stage !== "cancelled" && r.s.balance > 0;
+      return true;
+    });
+    if (!rows.length) return '<p class="empty">' + esc(t("orders.emptyFilter")) + "</p>";
     var groups = { late: [], today: [], tomorrow: [], week: [], later: [], noDate: [], past: [] };
     var d0 = today(),
       d1 = L.addDays(d0, 1),
@@ -339,81 +437,28 @@ NT.app = (function () {
                 : "later";
       groups[g].push(r);
     });
-    var order = ["late", "today", "tomorrow", "week", "later", "noDate", "past"];
-    var html = '<div class="stack"><a class="btn primary big" href="#/nuevo">' + esc(t("orders.new")) + "</a>";
-    html +=
-      '<input type="search" data-input="search" value="' +
-      esc(ui.search) +
-      '" placeholder="' +
-      esc(t("orders.searchPlaceholder")) +
-      '" aria-label="' +
-      esc(t("common.search")) +
-      '" />';
-    html +=
-      '<div class="chips">' +
-      ["open", "balance", "all"]
-        .map(function (f) {
-          return (
-            '<button type="button" data-act="filter" data-v="' +
-            f +
-            '"' +
-            pressed(ui.filter === f) +
-            ">" +
-            esc(t("orders.filter." + f)) +
-            "</button>"
-          );
-        })
-        .join("") +
-      "</div></div>";
-
-    if (!snap.orders.length) {
-      var noCatalog = !products().length;
-      return (
-        html +
-        '<div class="empty"><p>' +
-        esc(t("orders.empty")) +
-        "</p>" +
-        (noCatalog ? "<p>" + esc(t("orders.emptyCatalog")) + "</p>" : "") +
-        '<div class="stack">' +
-        (noCatalog ? '<a class="btn" href="#/producto/nuevo">' + esc(t("catalog.addProduct")) + "</a>" : "") +
-        '<button type="button" class="quiet" data-act="demoLoad">' +
-        esc(t("orders.tryDemo")) +
-        "</button></div></div>"
-      );
-    }
-    if (!rows.length) return html + '<p class="empty">' + esc(t("orders.emptyFilter")) + "</p>";
-    order.forEach(function (g) {
-      if (!groups[g].length) return;
+    var html = "",
+      left = shown;
+    ["late", "today", "tomorrow", "week", "later", "noDate", "past"].forEach(function (g) {
+      if (!groups[g].length || left <= 0) return;
       groups[g].sort(function (a, b) {
         var da = a.o.deliveryDate || "9999",
           db = b.o.deliveryDate || "9999";
         if (g === "past") return da < db ? 1 : da > db ? -1 : 0;
         return da < db ? -1 : da > db ? 1 : String(a.o.folio).localeCompare(String(b.o.folio));
       });
-      html += '<h2 class="group-title">' + esc(t("orders.group." + g)) + '</h2><ul class="stubs">';
-      groups[g].forEach(function (r) {
-        html +=
-          '<li><a class="stub" href="#/pedido/' +
-          encodeURIComponent(r.o.id) +
-          '"><span class="folio">' +
-          esc(r.o.folio) +
-          '</span><span class="who">' +
-          esc(r.o.customerName || t("orders.noCustomer")) +
-          '</span><span class="money">' +
-          money(r.s.total) +
-          '</span><span class="meta"><span>' +
-          esc(relDate(r.o.deliveryDate)) +
-          " · " +
-          esc(t("stage." + r.o.stage)) +
-          " · " +
-          esc(r.notes === 1 ? t("orders.oneNote") : t("orders.notesCount", { n: r.notes })) +
-          "</span>" +
-          pill(r.s.status) +
-          "</span></a></li>";
-      });
-      html += "</ul>";
+      var part = groups[g].slice(0, left);
+      left -= part.length;
+      html +=
+        '<h2 class="group-title">' +
+        esc(t("orders.group." + g)) +
+        " (" +
+        groups[g].length +
+        ')</h2><ul class="stubs">' +
+        part.map(stubRow).join("") +
+        "</ul>";
     });
-    return html;
+    return html + more(rows.length);
   }
 
   // ---------- note editor (new order or a note of an order) ----------
@@ -558,24 +603,21 @@ NT.app = (function () {
     return L.noteTotal({ lines: d.lines });
   }
 
-  function draftProducts(d) {
-    var list = products().filter(function (p) {
-      return p.active !== false;
-    });
-    var html =
-      '<div class="stack"><div class="who-line"><div><strong>' +
-      esc(t("draft.for", { name: d.customerName || t("draft.noName") })) +
-      "</strong><br />";
-    var effective = d.deliveryDate || (d.orderId && (store.get("orders/" + d.orderId) || {}).deliveryDate);
-    html +=
-      '<span class="hint">' +
-      esc(t("draft.delivery", { date: effective ? fmtDate(effective, "long") : t("common.noDate") })) +
-      "</span></div>";
-    html += '<button type="button" class="quiet" data-act="draftToCustomer">' + esc(t("draft.changeCustomer")) + "</button></div>";
-    html += "<h1>" + esc(t("draft.productsTitle")) + "</h1>";
-    if (!list.length)
-      html += "<p>" + esc(t("draft.noProducts")) + '</p><a class="btn" href="#/producto/nuevo">' + esc(t("catalog.addProduct")) + "</a>";
-    html += '<div class="tiles">';
+  var SEARCH_FROM = 12;
+
+  /** Product tiles for the note editor: best sellers of the last 60 days first; filtered by the product search. */
+  function draftTiles(d) {
+    var ranking = L.productRanking(liveDocs("notes"), L.addDays(today(), -60));
+    var q = L.normalize(d.productSearch || "");
+    var list = products()
+      .filter(function (p) {
+        return p.active !== false && (!q || L.normalize(p.name).indexOf(q) >= 0);
+      })
+      .sort(function (a, b) {
+        return (ranking[b.id] || 0) - (ranking[a.id] || 0) || (a.position || 0) - (b.position || 0);
+      });
+    var html = "";
+    if (q && !list.length) return '<p class="hint" style="grid-column:1/-1">' + esc(t("draft.noMatch")) + "</p>";
     list.forEach(function (p) {
       var open = d.open === p.id;
       html +=
@@ -612,6 +654,36 @@ NT.app = (function () {
           "</div></div>";
       }
     });
+    return html;
+  }
+
+  function draftProducts(d) {
+    var list = products().filter(function (p) {
+      return p.active !== false;
+    });
+    var html =
+      '<div class="stack"><div class="who-line"><div><strong>' +
+      esc(t("draft.for", { name: d.customerName || t("draft.noName") })) +
+      "</strong><br />";
+    var effective = d.deliveryDate || (d.orderId && (store.get("orders/" + d.orderId) || {}).deliveryDate);
+    html +=
+      '<span class="hint">' +
+      esc(t("draft.delivery", { date: effective ? fmtDate(effective, "long") : t("common.noDate") })) +
+      "</span></div>";
+    html += '<button type="button" class="quiet" data-act="draftToCustomer">' + esc(t("draft.changeCustomer")) + "</button></div>";
+    html += "<h1>" + esc(t("draft.productsTitle")) + "</h1>";
+    if (!list.length)
+      html += "<p>" + esc(t("draft.noProducts")) + '</p><a class="btn" href="#/producto/nuevo">' + esc(t("catalog.addProduct")) + "</a>";
+    if (list.length > SEARCH_FROM)
+      html +=
+        '<div class="searchbox"><label class="visually-hidden" for="product-search">' +
+        esc(t("draft.searchProduct")) +
+        '</label><input id="product-search" type="search" autocomplete="off" data-input="productSearch" value="' +
+        esc(d.productSearch || "") +
+        '" placeholder="' +
+        esc(t("draft.searchProduct")) +
+        '" /></div>';
+    html += '<div class="tiles" id="draft-tiles">' + draftTiles(d);
     html += "</div>";
     html += "<section><h2>" + esc(t("draft.lines")) + "</h2>";
     if (!d.lines.length) html += '<p class="hint">' + esc(t("draft.empty")) + "</p>";
@@ -1109,13 +1181,13 @@ NT.app = (function () {
         h.path.indexOf("orders/") === 0
           ? t("history.order")
           : h.path.indexOf("notes/") === 0
-            ? t("history.note", { n: (h.after || h.before || {}).number || "" })
+            ? t("history.note", { n: (h.ref || h.after || h.before || {}).number || "" })
             : t("history.paymentDoc");
       var action =
         h.action === "stage"
-          ? t("history.stage", { stage: t("stage." + ((h.after || {}).stage || "")) })
+          ? t("history.stage", { stage: t("stage." + (h.changes && h.changes.stage ? h.changes.stage[1] : (h.after || {}).stage || "")) })
           : h.action === "payment"
-            ? t("history.payment", { amount: money((h.after || {}).amount || 0) })
+            ? t("history.payment", { amount: money((h.ref || h.after || {}).amount || 0) })
             : t("history." + h.action);
       html +=
         "<li><strong>" +
@@ -1127,7 +1199,7 @@ NT.app = (function () {
         " " +
         esc(t("history.by", { by: h.by })) +
         "</span>";
-      if (h.before && (h.action === "update" || h.action === "delete" || h.action === "stage"))
+      if ((h.changes || h.before) && (h.action === "update" || h.action === "delete" || h.action === "stage" || h.action === "restore"))
         html +=
           '<br /><button type="button" class="quiet" data-act="restore" data-id="' +
           esc(h.id) +
@@ -1310,48 +1382,60 @@ NT.app = (function () {
       money(r.pending) +
       "</span></div></div>";
     if (!r.notes) return html + '<p class="empty">' + esc(t("reports.empty")) + "</p>";
+    var open = reportOpen();
     html +=
-      '<div class="section-head"><h2>' +
-      esc(t("reports.byProduct")) +
-      '</h2></div><div class="table-wrap"><table class="data"><thead><tr><th>' +
-      esc(t("print.product")) +
-      '</th><th class="num">' +
-      esc(t("reports.colQty")) +
-      '</th><th class="num">' +
-      esc(t("reports.colWeight")) +
-      '</th><th class="num">' +
-      esc(t("reports.colAmount")) +
-      "</th></tr></thead><tbody>";
+      '<div class="row" style="margin-top:1.25rem"><button type="button" class="quiet" data-act="reportExpand" data-v="1">' +
+      esc(t("reports.expandAll")) +
+      '</button><button type="button" class="quiet" data-act="reportExpand" data-v="0">' +
+      esc(t("reports.collapseAll")) +
+      "</button></div>";
+
+    // By product: one row per product; its presentations open under it.
+    var prod = '<div class="pad ruled">';
     r.byProduct.forEach(function (p) {
-      html +=
-        "<tr><td><strong>" +
+      var head =
+        '<span class="fold-name">' +
         esc(p.productName) +
-        '</strong></td><td class="num">' +
-        p.qty +
-        '</td><td class="num">' +
-        (p.grams ? esc(L.formatWeight(p.grams)) : "") +
-        '</td><td class="num"><strong>' +
+        '</span><span class="fold-figs"><span>' +
+        esc(t("common.pieces", { n: p.qty })) +
+        (p.grams ? " · " + esc(L.formatWeight(p.grams)) : "") +
+        "</span><strong>" +
         money(p.amount) +
-        "</strong></td></tr>";
-      if (p.presentations.length > 1)
-        p.presentations.forEach(function (x) {
-          html +=
-            '<tr class="sub"><td>' +
-            esc(x.presentationLabel) +
-            '</td><td class="num">' +
-            x.qty +
-            '</td><td class="num">' +
-            (x.grams ? esc(L.formatWeight(x.grams)) : "") +
-            '</td><td class="num">' +
-            money(x.amount) +
-            "</td></tr>";
-        });
+        "</strong></span>";
+      if (p.presentations.length < 2) {
+        prod += '<div class="fold-row">' + head + "</div>";
+        return;
+      }
+      prod +=
+        '<details class="fold" data-fold="p:' +
+        esc(p.productId) +
+        '"' +
+        (open["p:" + p.productId] ? " open" : "") +
+        "><summary>" +
+        head +
+        '</summary><table class="data"><tbody>' +
+        p.presentations
+          .map(function (x) {
+            return (
+              '<tr class="sub"><td>' +
+              esc(x.presentationLabel) +
+              '</td><td class="num">' +
+              x.qty +
+              '</td><td class="num">' +
+              (x.grams ? esc(L.formatWeight(x.grams)) : "") +
+              '</td><td class="num">' +
+              money(x.amount) +
+              "</td></tr>"
+            );
+          })
+          .join("") +
+        "</tbody></table></details>";
     });
-    html += "</tbody></table></div>";
-    html +=
-      '<div class="section-head"><h2>' +
-      esc(t("reports.byCustomer")) +
-      '</h2></div><div class="table-wrap"><table class="data"><thead><tr><th>' +
+    prod += "</div>";
+    html += reportSection("product", t("reports.byProduct"), r.byProduct.length, prod, open);
+
+    var cust =
+      '<div class="table-wrap"><table class="data"><thead><tr><th>' +
       esc(t("print.customer")) +
       '</th><th class="num">' +
       esc(t("reports.colOrders")) +
@@ -1361,7 +1445,7 @@ NT.app = (function () {
       esc(t("reports.colBalance")) +
       "</th></tr></thead><tbody>";
     r.byCustomer.forEach(function (c) {
-      html +=
+      cust +=
         "<tr><td>" +
         esc(c.name || t("orders.noCustomer")) +
         '</td><td class="num">' +
@@ -1372,13 +1456,15 @@ NT.app = (function () {
         money(Math.max(0, c.balance)) +
         "</td></tr>";
     });
-    html += "</tbody></table></div>";
+    cust += "</tbody></table></div>";
+    html += reportSection("customer", t("reports.byCustomer"), r.byCustomer.length, cust, open);
+
     var max = r.byDay.reduce(function (m, d) {
       return Math.max(m, d.amount);
     }, 1);
-    html += '<div class="section-head"><h2>' + esc(t("reports.byDay")) + '</h2></div><table class="data"><tbody>';
+    var days = '<table class="data"><tbody>';
     r.byDay.forEach(function (d) {
-      html +=
+      days +=
         '<tr><td style="white-space:nowrap">' +
         esc(fmtDate(d.date)) +
         '</td><td style="width:50%"><div class="bar" style="width:' +
@@ -1387,8 +1473,44 @@ NT.app = (function () {
         money(d.amount) +
         "</td></tr>";
     });
-    return html + "</tbody></table>";
+    days += "</tbody></table>";
+    html += reportSection("day", t("reports.byDay"), r.byDay.length, days, open);
+    return html;
   }
+
+  /** Which report sections and products are open: { product, customer, day, "p:<id>" }. Sections start open. */
+  function reportOpen() {
+    if (!ui.reportOpen) {
+      var saved = null;
+      try {
+        saved = JSON.parse(NT.prefs.get("reportOpen") || "null");
+      } catch {
+        // catch-ok: an unreadable preference starts with every section open.
+        saved = null;
+      }
+      ui.reportOpen = saved || { product: true, customer: true, day: true };
+    }
+    return ui.reportOpen;
+  }
+  function saveReportOpen() {
+    NT.prefs.set("reportOpen", JSON.stringify(ui.reportOpen));
+  }
+  function reportSection(key, title, count, body, open) {
+    return (
+      '<details class="report-section" data-fold="' +
+      key +
+      '"' +
+      (open[key] ? " open" : "") +
+      "><summary><h2>" +
+      esc(title) +
+      ' <span class="hint">(' +
+      count +
+      ")</span></h2></summary>" +
+      body +
+      "</details>"
+    );
+  }
+
   function loadOnlineReport(range, key) {
     ui.report.loading = true;
     ui.report.error = false;
@@ -1409,6 +1531,39 @@ NT.app = (function () {
   }
 
   // ---------- catalog ----------
+  /** The product list of the catalog, filtered by the catalog search. */
+  function catalogList() {
+    var q = L.normalize(ui.catalogSearch || "");
+    var list = products().filter(function (p) {
+      return !q || L.normalize(p.name).indexOf(q) >= 0;
+    });
+    if (!list.length) return '<p class="hint">' + esc(t("draft.noMatch")) + "</p>";
+    var html = "";
+    html += '<ul class="stubs">';
+    list.forEach(function (p) {
+      html +=
+        '<li><a class="stub" style="grid-template-columns:1fr" href="#/producto/' +
+        encodeURIComponent(p.id) +
+        '"><span class="who' +
+        (p.active === false ? " inactive" : "") +
+        '">' +
+        esc(p.name) +
+        (p.active === false ? " · " + esc(t("catalog.inactive")) : "") +
+        '</span><span class="meta" style="grid-column:1">' +
+        (p.presentations || [])
+          .filter(function (x) {
+            return x.active !== false;
+          })
+          .map(function (x) {
+            return "<span>" + esc(x.label) + " " + money(x.price) + "</span>";
+          })
+          .join("") +
+        "</span></a></li>";
+    });
+    html += "</ul>";
+    return html;
+  }
+
   function catalogView() {
     var list = products();
     var html =
@@ -1419,28 +1574,16 @@ NT.app = (function () {
       "</a></div>";
     if (!list.length) html += '<p class="sheet">' + esc(t("catalog.empty")) + "</p>";
     else {
-      html += '<ul class="stubs">';
-      list.forEach(function (p) {
+      if (list.length > SEARCH_FROM)
         html +=
-          '<li><a class="stub" style="grid-template-columns:1fr" href="#/producto/' +
-          encodeURIComponent(p.id) +
-          '"><span class="who' +
-          (p.active === false ? " inactive" : "") +
-          '">' +
-          esc(p.name) +
-          (p.active === false ? " · " + esc(t("catalog.inactive")) : "") +
-          '</span><span class="meta" style="grid-column:1">' +
-          (p.presentations || [])
-            .filter(function (x) {
-              return x.active !== false;
-            })
-            .map(function (x) {
-              return "<span>" + esc(x.label) + " " + money(x.price) + "</span>";
-            })
-            .join("") +
-          "</span></a></li>";
-      });
-      html += "</ul>";
+          '<div class="searchbox" style="margin-bottom:0.75rem"><label class="visually-hidden" for="catalog-search">' +
+          esc(t("catalog.search")) +
+          '</label><input id="catalog-search" type="search" autocomplete="off" data-input="catalogSearch" value="' +
+          esc(ui.catalogSearch || "") +
+          '" placeholder="' +
+          esc(t("catalog.search")) +
+          '" /></div>';
+      html += '<div id="catalog-list">' + catalogList() + "</div>";
     }
     var cs = customers();
     html +=
@@ -1682,6 +1825,29 @@ NT.app = (function () {
     html += dbSection();
 
     html += '<section class="sheet stack"><h2>' + esc(t("settings.data")) + "</h2>";
+    if (ui.space)
+      html +=
+        '<p class="hint">' +
+        esc(
+          t("space.used", {
+            used: mb(ui.space.used),
+            total: mb(ui.space.total),
+            engine: t("space.engine." + (store.engine || "localStorage")),
+          })
+        ) +
+        "</p>";
+    html +=
+      '<p class="hint">' +
+      esc(t("settings.exportFullHelp")) +
+      "</p>" +
+      (ui.exporting
+        ? '<p class="notice">' + esc(t("settings.exporting")) + "</p>"
+        : '<button type="button" class="primary" data-act="exportCsv">' +
+          esc(t("settings.exportCsv")) +
+          '</button><button type="button" data-act="exportSql">' +
+          esc(t("settings.exportSql")) +
+          "</button>");
+    html += '<p class="hint">' + esc(t("settings.exportHelp")) + "</p>";
     html += '<button type="button" data-act="export">' + esc(t("settings.export")) + "</button>";
     if (ui.importDocs)
       html +=
@@ -1926,7 +2092,19 @@ NT.app = (function () {
   var actions = {
     filter: function (el) {
       ui.filter = el.getAttribute("data-v");
+      ui.shown = PAGE_SIZE;
       render();
+    },
+    clearSearch: function () {
+      ui.search = "";
+      ui.shown = PAGE_SIZE;
+      render();
+      document.getElementById("order-search").focus();
+    },
+    showMore: function () {
+      ui.shown = (ui.shown || PAGE_SIZE) + PAGE_SIZE;
+      if (route().name === "pedidos") document.getElementById("order-results").innerHTML = ordersResults();
+      else render();
     },
     demoLoad: function () {
       NT.demo.load(repo, store, today()).then(function () {
@@ -2084,7 +2262,7 @@ NT.app = (function () {
       }, failToast);
     },
     restore: function (el) {
-      repo.restore(el.getAttribute("data-id"), "before").then(function () {
+      repo.restore(el.getAttribute("data-id")).then(function () {
         toast(t("order.restored"));
         render();
       }, failToast);
@@ -2093,7 +2271,7 @@ NT.app = (function () {
       var id = ui.undo;
       document.getElementById("toast").hidden = true;
       if (!id) return;
-      repo.restore(id, "before").then(function () {
+      repo.restore(id).then(function () {
         toast(t("order.restored"));
         render();
       }, failToast);
@@ -2147,6 +2325,15 @@ NT.app = (function () {
     reportMode: function (el) {
       ui.report.mode = el.getAttribute("data-v");
       render();
+    },
+    reportExpand: function (el) {
+      var on = el.getAttribute("data-v") === "1";
+      var open = reportOpen();
+      view.querySelectorAll("details[data-fold]").forEach(function (d) {
+        d.open = on;
+        open[d.getAttribute("data-fold")] = on;
+      });
+      saveReportOpen();
     },
     reportOnline: function () {
       ui.report.online = !ui.report.online;
@@ -2207,6 +2394,20 @@ NT.app = (function () {
         "notas-respaldo-" + today() + ".json",
         JSON.stringify({ app: "notas", schemaVersion: 1, exportedAt: new Date().toISOString(), data: store.exportAll() }, null, 1)
       );
+    },
+    exportCsv: function () {
+      fullExport(function (tables, stamp) {
+        download(
+          "notas-exportacion-" + today() + ".zip",
+          NT.exporter.zip(NT.exporter.csvFiles(tables), new Date(stamp)),
+          "application/zip"
+        );
+      });
+    },
+    exportSql: function () {
+      fullExport(function (tables, stamp) {
+        download("notas-exportacion-" + today() + ".sql", NT.exporter.sql(tables, stamp), "application/sql");
+      });
     },
     import: function () {
       document.getElementById("import-file").click();
@@ -2325,6 +2526,32 @@ NT.app = (function () {
     NT.log.error("ui.action_failed", { error: e });
     toast(problemText(e));
   }
+  /** Builds the complete export: in Connected mode from the whole database (falling back to this device), else from this device. */
+  function fullExport(save) {
+    if (ui.exporting) return;
+    ui.exporting = true;
+    render();
+    var localOnly = false;
+    var source = store.sync
+      ? store.sync.fetchAll().catch(function (e) {
+          NT.log.warn("export.fetch_all_failed", { error: e });
+          localOnly = true;
+          return store.exportAll();
+        })
+      : Promise.resolve(store.exportAll());
+    source
+      .then(function (docs) {
+        var tables = NT.exporter.tables(docs);
+        save(tables, new Date().toISOString());
+        toast(localOnly ? t("settings.exportLocalOnly") : t("settings.exportDone", { n: tables.renglones.length }));
+      })
+      .catch(failToast)
+      .then(function () {
+        ui.exporting = false;
+        if (route().name === "ajustes") render();
+      });
+  }
+
   function runImport(mode) {
     var docs = ui.importDocs;
     ui.importDocs = null;
@@ -2338,15 +2565,10 @@ NT.app = (function () {
   var inputs = {
     search: function (el) {
       ui.search = el.value;
-      var pos = el.selectionStart;
-      render();
-      var again = view.querySelector('[data-input="search"]');
-      again.focus();
-      try {
-        again.setSelectionRange(pos, pos);
-      } catch {
-        // catch-ok: some input types do not support selection; focus is enough.
-      }
+      ui.shown = PAGE_SIZE;
+      document.getElementById("order-results").innerHTML = ordersResults();
+      view.querySelector('[data-act="clearSearch"]').hidden = !ui.search;
+      document.getElementById("order-filters").hidden = !!ui.search.trim();
     },
     draftSearch: function (el) {
       var d = ui.draft;
@@ -2368,6 +2590,14 @@ NT.app = (function () {
       if (!el.value) return;
       ui.draft.deliveryDate = el.value;
       render();
+    },
+    productSearch: function (el) {
+      ui.draft.productSearch = el.value;
+      document.getElementById("draft-tiles").innerHTML = draftTiles(ui.draft);
+    },
+    catalogSearch: function (el) {
+      ui.catalogSearch = el.value;
+      document.getElementById("catalog-list").innerHTML = catalogList();
     },
     draftComment: function (el) {
       ui.draft.comment = el.value;
@@ -2583,6 +2813,17 @@ NT.app = (function () {
       var fn = forms[form.getAttribute("data-form")];
       if (fn) fn(form, new FormData(form), e.submitter);
     });
+    // <details> toggles do not bubble: listen in the capture phase to remember what is open.
+    view.addEventListener(
+      "toggle",
+      function (e) {
+        var key = e.target && e.target.getAttribute && e.target.getAttribute("data-fold");
+        if (!key) return;
+        reportOpen()[key] = e.target.open;
+        saveReportOpen();
+      },
+      true
+    );
     view.addEventListener("focusout", function () {
       if (ui.dirty)
         setTimeout(function () {
@@ -2622,6 +2863,7 @@ NT.app = (function () {
       var r = route();
       if (r.name !== "nuevo" && r.name !== "nota") ui.draft = null;
       if (r.name !== "producto") ui.productForm = null;
+      ui.shown = PAGE_SIZE;
       render();
       view.focus({ preventScroll: true });
       window.scrollTo(0, 0);
@@ -2646,6 +2888,52 @@ NT.app = (function () {
     }
   }
 
+  /** Asks the browser to keep this site's data (not clear it under pressure) and checks how full storage is. */
+  function protectStorage() {
+    var st = typeof navigator !== "undefined" && navigator.storage;
+    if (st && st.persist && store.engine === "indexeddb")
+      st.persist().then(
+        function (granted) {
+          NT.log.info("app.persist", { granted: granted });
+        },
+        function (e) {
+          NT.log.warn("app.persist_failed", { error: e });
+        }
+      );
+    checkSpace();
+    var writes = 0;
+    store.onChange(function () {
+      writes++;
+      if (writes % 25 === 0) checkSpace();
+    });
+  }
+  /** { used, total } in bytes for the storage in use; IndexedDB asks the browser, localStorage is about 5 million characters. */
+  function storageUse() {
+    var st = typeof navigator !== "undefined" && navigator.storage;
+    if (store.engine === "indexeddb" && st && st.estimate)
+      return st.estimate().then(function (e) {
+        return { used: e.usage || 0, total: e.quota || 0 };
+      });
+    return Promise.resolve({ used: JSON.stringify(store.exportAll()).length, total: 5000000 });
+  }
+  function checkSpace() {
+    return storageUse().then(
+      function (u) {
+        ui.space = u;
+        var full = u.total > 0 && u.used / u.total >= 0.8;
+        if (full && !ui.spaceWarned) toast(t("space.warning", { pct: Math.round((u.used / u.total) * 100) }));
+        ui.spaceWarned = full;
+        statusLine();
+      },
+      function (e) {
+        NT.log.warn("app.space_failed", { error: e });
+      }
+    );
+  }
+  function mb(bytes) {
+    return (Math.round((bytes / 1048576) * 10) / 10).toLocaleString("es-MX");
+  }
+
   function registerWorker() {
     if (!("serviceWorker" in navigator)) return;
     if (!/^https:$/.test(location.protocol) && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return;
@@ -2655,18 +2943,21 @@ NT.app = (function () {
     });
   }
 
+  /** Stops the app over data it cannot read, offering the raw data for download (raw null: data that cannot be opened at all). */
   function failClosed(raw) {
     view.innerHTML =
       '<div class="sheet stack"><h1>' +
-      esc(t("corrupt.title")) +
+      esc(t(raw === null ? "corrupt.unavailableTitle" : "corrupt.title")) +
       "</h1><p>" +
-      esc(t("corrupt.body")) +
-      '</p><button type="button" class="primary" id="corrupt-download">' +
-      esc(t("corrupt.download")) +
-      "</button></div>";
-    document.getElementById("corrupt-download").addEventListener("click", function () {
-      download("notas-datos-guardados-" + today() + ".json", raw);
-    });
+      esc(t(raw === null ? "corrupt.unavailableBody" : "corrupt.body")) +
+      "</p>" +
+      (raw === null ? "" : '<button type="button" class="primary" id="corrupt-download">' + esc(t("corrupt.download")) + "</button>") +
+      "</div>";
+    var button = document.getElementById("corrupt-download");
+    if (button)
+      button.addEventListener("click", function () {
+        download("notas-datos-guardados-" + today() + ".json", raw);
+      });
   }
 
   function start() {
@@ -2681,16 +2972,20 @@ NT.app = (function () {
       NT.log.error("ui.unhandled_rejection", { error: e.reason });
     });
     NT.i18n.init();
-    store = NT.createStore();
-    if (!store) {
-      view.innerHTML = '<p class="sheet">' + esc(t("status.noStorage")) + "</p>";
-      return;
-    }
-    if (store.corrupt) return failClosed(store.raw);
-    repo = NT.repo.create(store, { now: NT.clock.now, today: NT.clock.today, uuid: NT.clock.uuid, by: by, deviceCode: deviceCode });
-    wire();
-    render();
-    registerWorker();
+    NT.createStore().then(function (opened) {
+      store = opened;
+      if (!store) {
+        view.innerHTML = '<p class="sheet">' + esc(t("status.noStorage")) + "</p>";
+        return;
+      }
+      if (store.corrupt) return failClosed(store.raw);
+      if (store.failed) return failClosed(null);
+      repo = NT.repo.create(store, { now: NT.clock.now, today: NT.clock.today, uuid: NT.clock.uuid, by: by, deviceCode: deviceCode });
+      wire();
+      render();
+      registerWorker();
+      protectStorage();
+    });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);

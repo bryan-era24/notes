@@ -47,7 +47,41 @@ test("[TC-CAT-02-01] saving a product writes it and its history entry in one bat
   assert.equal(saved.updatedBy, "lite");
   const h = store.list("history")[0].data;
   assert.equal(h.action, "create");
-  assert.equal(h.before, null);
+  assert.equal(h.changes, null, "a creation stores no copy: the document itself is the record");
+});
+
+test("[TC-SYN-03-04] history keeps only the fields that changed, and a reference to show", async () => {
+  const { store, repo } = setup();
+  const o = await repo.createOrder({ customerName: "Ana" });
+  const line = { productId: "p", presentationId: "a", productName: "P", presentationLabel: "1", grams: null, unitPrice: 100, qty: 5 };
+  const n = await repo.saveNote(null, { orderId: o, lines: [line] });
+  await repo.setStage("notes/" + n, "delivered");
+  const stage = repo.historyOf(["notes/" + n]).find((h) => h.action === "stage");
+  assert.deepEqual(stage.changes, { stage: ["ordered", "delivered"] });
+  assert.equal(stage.ref.number, 1);
+  await repo.addPayment({ orderId: o, amount: 2500, method: "cash" });
+  const pay = store
+    .list("history")
+    .map((d) => d.data)
+    .find((h) => h.action === "payment");
+  assert.equal(pay.ref.amount, 2500);
+  assert.equal(pay.changes, null);
+});
+
+test("[TC-SYN-03-05] entries written in the older full-copy format can still be restored", async () => {
+  const { store, repo } = setup();
+  const c = await repo.saveCustomer(null, { name: "Ana" });
+  const now = store.get("customers/" + c);
+  await store.set("history/old1", {
+    path: "customers/" + c,
+    at: "2026-11-01T00:00:00Z",
+    by: "x",
+    action: "update",
+    before: Object.assign({}, now, { name: "Ana vieja" }),
+    after: now,
+  });
+  await repo.restore("old1");
+  assert.equal(store.get("customers/" + c).name, "Ana vieja");
 });
 
 test("[TC-CAT-02-02] an invalid product is refused and nothing is saved", async () => {
@@ -124,19 +158,19 @@ test("[TC-SYN-03-01] delete is soft and can be undone from history", async () =>
   await repo.remove("customers/" + c);
   assert.ok(store.get("customers/" + c).deletedAt);
   const del = repo.historyOf(["customers/" + c]).find((h) => h.action === "delete");
-  await repo.restore(del.id, "before");
+  await repo.restore(del.id);
   assert.equal(store.get("customers/" + c).deletedAt, undefined);
   assert.equal(store.get("customers/" + c).name, "Ana");
 });
 
-test("[TC-SYN-03-02] an overwritten note version can be restored from history", async () => {
+test("[TC-SYN-03-02] an overwritten note change can be undone from history", async () => {
   const { store, repo } = setup();
   const o = await repo.createOrder({});
   const line = { productId: "p", presentationId: "a", productName: "P", presentationLabel: "1", grams: null, unitPrice: 100, qty: 5 };
   const n = await repo.saveNote(null, { orderId: o, lines: [line] });
   await repo.saveNote(n, { orderId: o, lines: [Object.assign({}, line, { qty: 1 })] });
   const upd = repo.historyOf(["notes/" + n]).find((h) => h.action === "update");
-  await repo.restore(upd.id, "before");
+  await repo.restore(upd.id);
   assert.equal(store.get("notes/" + n).lines[0].qty, 5);
 });
 

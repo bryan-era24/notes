@@ -1,44 +1,23 @@
 /*
- * Purpose: The "local" backend: every document of the app kept in this browser's localStorage under one key, and the core the synced backend builds on.
- * Responsibilities: Implement the store contract of backend/store.js with atomic multi-document writes, refuse to start over data it cannot read
- * (fail closed: the app offers to download it instead), and let the synced backend record pending changes inside the same write.
- * It must not touch the DOM or the network.
+ * Purpose: The device store: every document of the app held in memory and saved to this browser's storage, and the core the synced
+ * backend builds on. IndexedDB is used when the browser has it (backend/store.idb.js); localStorage otherwise.
+ * Responsibilities: Implement the store contract of backend/store.js with atomic multi-document writes that are saved one after another
+ * (a write resolves only once it is safely stored; a failed write is undone in memory), refuse to start over data it cannot read (fail
+ * closed), and let the synced backend record pending changes inside the same write. It must not touch the DOM or the network.
  */
 window.NT = window.NT || {};
 NT.backends = NT.backends || {};
 
 /**
- * Opens the local document store.
- * hooks.afterWrite(data, changes) runs inside every user write, before saving, with changes = [{ path, op: "upsert" | "remove" }];
- * whatever it puts under a path starting with "_" is saved in the same localStorage write.
- * Returns { store, core }, { corrupt: true, raw } when the saved data cannot be parsed, or null when storage cannot be used.
+ * The store over in-memory `data`. `persist(data, puts, removes)` saves the changed paths (puts: { path: document }, removes: [path])
+ * and returns a Promise, or throws. hooks.afterWrite(data, changes) runs inside every user write, before saving; whatever it puts under
+ * a path starting with "_" is saved in the same write. Returns { store, core }.
  */
-NT.openLocalStore = function (config, hooks) {
+NT.openStoreCore = function (data, persist, hooks) {
   "use strict";
   hooks = hooks || {};
-  var KEY = config.storageKey || "notas:v1";
   var listeners = [];
-  var data = {};
-
-  try {
-    localStorage.setItem(KEY + ":probe", "1");
-    localStorage.removeItem(KEY + ":probe");
-  } catch (e) {
-    // catch-ok: private mode or blocked storage means "cannot save here"; the app says so.
-    NT.log.error("store.blocked", { error: e });
-    return null;
-  }
-  var raw = localStorage.getItem(KEY);
-  if (raw !== null) {
-    try {
-      data = JSON.parse(raw);
-      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("not an object");
-    } catch (e) {
-      // catch-ok: fail closed. Nothing is written over unreadable data; the app shows it for download.
-      NT.log.error("store.corrupt", { error: e });
-      return { corrupt: true, raw: raw };
-    }
-  }
+  var queue = Promise.resolve();
 
   function isInternal(path) {
     return path.charAt(0) === "_";
@@ -51,8 +30,14 @@ NT.openLocalStore = function (config, hooks) {
       return !isInternal(k);
     });
   }
-  function save() {
-    localStorage.setItem(KEY, JSON.stringify(data));
+  function internalSnapshot() {
+    var out = {};
+    Object.keys(data)
+      .filter(isInternal)
+      .forEach(function (k) {
+        out[k] = JSON.stringify(data[k]);
+      });
+    return out;
   }
   function notify(changes) {
     listeners.slice().forEach(function (fn) {
@@ -63,28 +48,87 @@ NT.openLocalStore = function (config, hooks) {
     return v === undefined ? undefined : JSON.parse(JSON.stringify(v));
   }
 
-  /** Applies all ops or none: on a failed save the previous data is restored. */
-  function write(ops) {
-    return new Promise(function (resolve, reject) {
-      var before = JSON.stringify(data);
-      try {
-        var changes = ops.map(function (op) {
-          if (!op.path || isInternal(op.path)) throw new Error("invalid path");
-          if (op.value === null) delete data[op.path];
-          else data[op.path] = clone(op.value);
-          return { path: op.path, op: op.value === null ? "remove" : "upsert" };
-        });
-        if (hooks.afterWrite && changes.length) hooks.afterWrite(data, changes);
-        save();
-        NT.log.debug("store.write", { paths: changes.length });
-        notify(changes);
-        resolve();
-      } catch (e) {
-        data = JSON.parse(before);
-        NT.log.error("store.write_failed", { error: e });
-        reject(e);
+  /**
+   * Runs `mutate()` (which changes `data` and returns the changes), the hook, and the save, as one step after the previous one.
+   * On a failed save every path it touched is put back as it was, so memory never shows what storage does not hold.
+   */
+  function step(mutate, runHook) {
+    var run = queue.then(function () {
+      var previous = {};
+      var internalBefore = internalSnapshot();
+      var touched = [];
+      function remember(path) {
+        if (!Object.prototype.hasOwnProperty.call(previous, path)) previous[path] = own(path) ? data[path] : undefined;
       }
+      var changes;
+      try {
+        changes = mutate(remember);
+        if (runHook && hooks.afterWrite && changes.length) hooks.afterWrite(data, changes);
+      } catch (e) {
+        // catch-ok: memory is put back as it was and the error is returned to the caller as a rejection below.
+        Object.keys(previous).forEach(function (p) {
+          if (previous[p] === undefined) delete data[p];
+          else data[p] = previous[p];
+        });
+        return Promise.reject(e);
+      }
+      var puts = {},
+        removes = [];
+      changes.forEach(function (c) {
+        touched.push(c.path);
+        if (own(c.path)) puts[c.path] = data[c.path];
+        else removes.push(c.path);
+      });
+      var internalAfter = internalSnapshot();
+      Object.keys(Object.assign({}, internalBefore, internalAfter)).forEach(function (k) {
+        if (internalBefore[k] === internalAfter[k]) return;
+        if (own(k)) puts[k] = data[k];
+        else removes.push(k);
+      });
+      return Promise.resolve()
+        .then(function () {
+          return persist(data, puts, removes);
+        })
+        .then(
+          function () {
+            NT.log.debug("store.write", { paths: touched.length });
+            if (changes.length) notify(changes);
+          },
+          function (e) {
+            Object.keys(previous).forEach(function (p) {
+              if (previous[p] === undefined) delete data[p];
+              else data[p] = previous[p];
+            });
+            Object.keys(Object.assign({}, internalBefore, internalSnapshot())).forEach(function (k) {
+              if (internalBefore[k] === undefined) delete data[k];
+              else data[k] = JSON.parse(internalBefore[k]);
+            });
+            NT.log.error("store.write_failed", { error: e });
+            throw e;
+          }
+        );
     });
+    queue = run.catch(function () {
+      // catch-ok: the failure is reported to the caller of this write; the next write still runs.
+    });
+    return run;
+  }
+
+  /** A user write: ops [{ path, value | null }], plus optional internal documents saved with it. */
+  function write(ops, internal) {
+    return step(function (remember) {
+      var changes = ops.map(function (op) {
+        if (!op.path || isInternal(op.path)) throw new Error("invalid path");
+        remember(op.path);
+        if (op.value === null) delete data[op.path];
+        else data[op.path] = clone(op.value);
+        return { path: op.path, op: op.value === null ? "remove" : "upsert" };
+      });
+      Object.keys(internal || {}).forEach(function (k) {
+        data[k] = internal[k];
+      });
+      return changes;
+    }, true);
   }
 
   var store = {
@@ -133,12 +177,12 @@ NT.openLocalStore = function (config, hooks) {
      */
     importAll: function (docs, mode) {
       var ops = [],
+        internal = {},
         result = { added: 0, updated: 0, kept: 0 };
       var incoming = Object.keys(docs).filter(function (k) {
         return !isInternal(k);
       });
       if (mode === "replace") {
-        var copy = store.exportAll();
         userPaths().forEach(function (k) {
           if (!Object.prototype.hasOwnProperty.call(docs, k)) ops.push({ path: k, value: null });
         });
@@ -146,7 +190,7 @@ NT.openLocalStore = function (config, hooks) {
           ops.push({ path: k, value: docs[k] });
           result[own(k) ? "updated" : "added"]++;
         });
-        data["_import/before"] = { at: new Date().toISOString(), documents: copy };
+        internal["_import/before"] = { at: new Date().toISOString(), documents: store.exportAll() };
       } else {
         incoming.forEach(function (k) {
           if (!own(k)) {
@@ -158,7 +202,7 @@ NT.openLocalStore = function (config, hooks) {
           } else result.kept++;
         });
       }
-      return write(ops).then(function () {
+      return write(ops, internal).then(function () {
         return result;
       });
     },
@@ -170,28 +214,118 @@ NT.openLocalStore = function (config, hooks) {
       return data[path];
     },
     paths: userPaths,
-    /** Applies { path: document | null } and internal state in one saved write, then notifies. */
+    /** Applies { path: document | null } and internal state in one saved write, then notifies. Returns a Promise. */
     apply: function (docs, internal) {
-      var changes = [];
-      Object.keys(docs || {}).forEach(function (path) {
-        if (docs[path] === null) delete data[path];
-        else data[path] = docs[path];
-        changes.push({ path: path, op: docs[path] === null ? "remove" : "upsert", remote: true });
-      });
-      Object.keys(internal || {}).forEach(function (path) {
-        data[path] = internal[path];
-      });
-      save();
-      if (changes.length) notify(changes);
+      return step(function (remember) {
+        var changes = Object.keys(docs || {}).map(function (path) {
+          remember(path);
+          if (docs[path] === null) delete data[path];
+          else data[path] = docs[path];
+          return { path: path, op: docs[path] === null ? "remove" : "upsert", remote: true };
+        });
+        Object.keys(internal || {}).forEach(function (path) {
+          data[path] = internal[path];
+        });
+        return changes;
+      }, false);
     },
   };
 
   return { store: store, core: core };
 };
 
+/**
+ * Opens the store over localStorage (one key holding every document). Synchronous.
+ * Returns { store, core, engine: "localStorage" }, { corrupt: true, raw } when the saved data cannot be parsed, or null when storage
+ * cannot be used.
+ */
+NT.openLocalStore = function (config, hooks) {
+  "use strict";
+  var KEY = config.storageKey || "notas:v1";
+  var data = {};
+  try {
+    localStorage.setItem(KEY + ":probe", "1");
+    localStorage.removeItem(KEY + ":probe");
+  } catch (e) {
+    // catch-ok: private mode or blocked storage means "cannot save here"; the app says so.
+    NT.log.error("store.blocked", { error: e });
+    return null;
+  }
+  var raw = localStorage.getItem(KEY);
+  if (raw !== null) {
+    try {
+      data = JSON.parse(raw);
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("not an object");
+    } catch (e) {
+      // catch-ok: fail closed. Nothing is written over unreadable data; the app shows it for download.
+      NT.log.error("store.corrupt", { error: e });
+      return { corrupt: true, raw: raw };
+    }
+  }
+  var opened = NT.openStoreCore(
+    data,
+    function (all) {
+      localStorage.setItem(KEY, JSON.stringify(all));
+    },
+    hooks
+  );
+  opened.engine = "localStorage";
+  return opened;
+};
+
+/** The saved localStorage data as text, or null; for the migration to IndexedDB and the fail-closed download. */
+NT.readLocalStorageData = function (config) {
+  "use strict";
+  try {
+    return localStorage.getItem(config.storageKey || "notas:v1");
+  } catch {
+    // catch-ok: blocked storage means there is nothing to read.
+    return null;
+  }
+};
+/** Marks that this device's data moved to IndexedDB, so a later IndexedDB failure never falls back to the old copy. */
+NT.markMovedToIndexedDb = function (config) {
+  "use strict";
+  try {
+    localStorage.setItem((config.storageKey || "notas:v1") + ":moved", "indexeddb");
+  } catch (e) {
+    // catch-ok: without the mark, the old copy stays untouched anyway; logged for diagnostics.
+    NT.log.warn("store.mark_failed", { error: e });
+  }
+};
+NT.movedToIndexedDb = function (config) {
+  "use strict";
+  try {
+    return localStorage.getItem((config.storageKey || "notas:v1") + ":moved") === "indexeddb";
+  } catch {
+    // catch-ok: unreadable means not marked.
+    return false;
+  }
+};
+
+/**
+ * Opens the best store this browser offers: IndexedDB when available (moving data saved earlier in localStorage into it),
+ * otherwise localStorage. Resolves with what NT.openLocalStore returns, or { failed: "indexeddb" } when data moved to IndexedDB
+ * cannot be opened (the app stops instead of showing the old copy).
+ */
+NT.openDeviceStore = function (config, hooks) {
+  "use strict";
+  if (!NT.idbAvailable || !NT.idbAvailable()) {
+    if (NT.movedToIndexedDb(config)) return Promise.resolve({ failed: "indexeddb" });
+    return Promise.resolve(NT.openLocalStore(config, hooks));
+  }
+  return NT.openIdbStore(config, hooks).catch(function (e) {
+    NT.log.error("store.idb_open_failed", { error: e });
+    if (NT.movedToIndexedDb(config)) return { failed: "indexeddb" };
+    return NT.openLocalStore(config, hooks);
+  });
+};
+
 NT.backends.local = function (config) {
   "use strict";
-  var opened = NT.openLocalStore(config);
-  if (!opened || opened.corrupt) return opened;
-  return opened.store;
+  return NT.openDeviceStore(config).then(function (opened) {
+    if (!opened || opened.corrupt || opened.failed) return opened;
+    opened.store.engine = opened.engine;
+    return opened.store;
+  });
 };

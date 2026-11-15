@@ -90,6 +90,32 @@ a {
   outline-offset: 2px;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.searchbox {
+  position: relative;
+}
+.searchbox input {
+  padding-right: 3.75rem;
+  font-size: 1.2rem;
+}
+.searchbox .clear {
+  position: absolute;
+  right: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  min-height: 3rem;
+  width: 3rem;
+  padding: 0;
+  font-size: 1.6rem;
+  border: 0;
+}
 .skip {
   position: absolute;
   left: -999px;
@@ -743,6 +769,60 @@ table.data .num {
 table.data .sub td {
   color: var(--ink-soft);
   font-size: var(--size-small);
+}
+.report-section {
+  margin-top: 1rem;
+}
+.report-section > summary {
+  list-style: none;
+  gap: 0.75rem;
+  border-bottom: 2px solid var(--rule-strong);
+  margin-bottom: 0.5rem;
+}
+.report-section > summary::-webkit-details-marker,
+.fold > summary::-webkit-details-marker {
+  display: none;
+}
+.report-section > summary h2 {
+  margin: 0;
+}
+.report-section > summary::before,
+.fold > summary::before {
+  content: "▸";
+  font-size: 1.2rem;
+  color: var(--pen);
+  width: 1.25rem;
+  flex: none;
+  transition: transform 0.12s;
+}
+.report-section[open] > summary::before,
+.fold[open] > summary::before {
+  transform: rotate(90deg);
+}
+.fold > summary,
+.fold-row {
+  list-style: none;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  min-height: var(--tap);
+}
+.fold-row {
+  padding-left: 1.75rem !important;
+}
+.fold-name {
+  flex: 1;
+  font-weight: 700;
+}
+.fold-figs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem 0.75rem;
+  text-align: right;
+}
+.fold table.data {
+  margin: 0.25rem 0 0.5rem;
 }
 .bar {
   height: 0.6rem;

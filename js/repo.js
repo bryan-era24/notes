@@ -1,6 +1,6 @@
 /*
  * Purpose: Every change the app makes to its data: catalog, customers, orders, notes, stages, payments, settings and restores.
- * Responsibilities: Validate with NT.logic, stamp updatedAt/updatedBy, and save each change together with its history entry (and, for a
+ * Responsibilities: Validate with NT.logic, stamp updatedAt/updatedBy, and save each change together with its history entry (only the fields that changed) (and, for a
  * new order, the device's folio counter) in one store batch, so they are saved together or not at all. Deletion is soft (deletedAt).
  * It reaches data only through the store contract and gets time, ids and the author from the env passed in; it never touches the DOM.
  */
@@ -25,6 +25,29 @@ NT.repo = (function () {
     function stamp(doc) {
       return Object.assign({}, doc, { updatedAt: env.now().toISOString(), updatedBy: env.by() });
     }
+    /** { field: [old, new] } for the fields that differ, leaving out the stamps. */
+    function diff(before, after) {
+      var out = {},
+        any = false;
+      var keys = Object.keys(Object.assign({}, before || {}, after || {}));
+      keys.forEach(function (k) {
+        if (k === "updatedAt" || k === "updatedBy") return;
+        var a = before ? before[k] : undefined,
+          b = after ? after[k] : undefined;
+        if (JSON.stringify(a) === JSON.stringify(b)) return;
+        out[k] = [a === undefined ? null : a, b === undefined ? null : b];
+        any = true;
+      });
+      return any ? out : null;
+    }
+    /** What a history entry needs to be shown without opening the document. */
+    function ref(path, doc) {
+      var c = path.split("/")[0];
+      if (c === "notes") return { number: doc.number, orderId: doc.orderId };
+      if (c === "payments") return { amount: doc.amount, orderId: doc.orderId };
+      if (c === "orders") return { folio: doc.folio };
+      return { name: doc.name || null };
+    }
     function historyOp(path, action, before, after) {
       var at = env.now().toISOString();
       return {
@@ -35,8 +58,9 @@ NT.repo = (function () {
           localDate: env.today(),
           by: env.by(),
           action: action,
-          before: before || null,
-          after: after || null,
+          // A creation stores no copy: the document itself is the record (decision 0006).
+          changes: action === "create" || action === "payment" ? null : diff(before, after),
+          ref: ref(path, after || before || {}),
           updatedAt: at,
         },
       };
@@ -198,14 +222,28 @@ NT.repo = (function () {
       return save(path, Object.assign({}, current, { deletedAt: env.now().toISOString() }), "delete");
     }
 
-    /** Puts a document back as it was before (or after) a history entry. */
-    function restore(historyId, which) {
+    /**
+     * Undoes one history entry: puts back the old values of the fields it changed (a creation is undone by deleting).
+     * Entries written before decision 0006 hold full copies (before/after) and are restored from them.
+     */
+    function restore(historyId) {
       var h = store.get("history/" + historyId);
       if (!h) return Promise.reject(invalid(["history.missing"]));
-      var version = which === "after" ? h.after : h.before;
-      if (!version) return remove(h.path);
-      var value = Object.assign({}, version);
-      delete value.deletedAt;
+      var current = store.get(h.path);
+      if (h.action === "create" || h.action === "payment") return remove(h.path);
+      var value;
+      if (h.changes) {
+        if (!current) return Promise.reject(invalid(["missing"]));
+        value = Object.assign({}, current);
+        Object.keys(h.changes).forEach(function (k) {
+          var old = h.changes[k][0];
+          if (old === null) delete value[k];
+          else value[k] = old;
+        });
+      } else if (h.before) {
+        value = Object.assign({}, h.before);
+        delete value.deletedAt;
+      } else return remove(h.path);
       return save(h.path, value, "restore");
     }
 
