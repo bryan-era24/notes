@@ -8,6 +8,7 @@ Last verified: 2026-11-15. Status: current.
 | [ARCHITECTURE.md](ARCHITECTURE.md)                                                           | adding or moving a module, or changing who may use what                            |
 | [TECHNICAL.md](TECHNICAL.md)                                                                 | changing the data model, the store contract, sync, printing, export or diagnostics |
 | [FLOWS.md](FLOWS.md)                                                                         | changing what a screen shows or does                                               |
+| [DESIGN.md](DESIGN.md)                                                                       | adding a colour, a button style, a pill or a notice                                |
 | [DATABASE.md](DATABASE.md)                                                                   | setting up Connected mode or changing `db/schema.sql`                              |
 | [TESTING.md](TESTING.md)                                                                     | adding or changing tests                                                           |
 | [decisions/](decisions/README.md)                                                            | reversing a choice that looks odd                                                  |

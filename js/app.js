@@ -15,7 +15,7 @@ NT.app = (function () {
   var esc = NT.print.escape;
   var L = NT.logic;
   var money = L.formatMoney;
-  var VERSION = "1.3.0";
+  var VERSION = "1.4.0";
 
   var store = null,
     backup = null,
@@ -152,8 +152,13 @@ NT.app = (function () {
     }
     return t("problem.generic");
   }
+  /** Payment status as a pill: the words say it, the colour (docs/DESIGN.md §3) lets it be seen from afar. */
   function pill(status) {
-    return '<span class="pill ' + status + '">' + esc(t("pay.status." + status)) + "</span>";
+    return '<span class="pill pay-' + status + '">' + esc(t("pay.status." + status)) + "</span>";
+  }
+  /** Stage as a pill, coloured from neutral to green as the order advances. */
+  function stagePill(stage) {
+    return '<span class="pill stage-' + stage + '">' + esc(t("stage." + stage)) + "</span>";
   }
   function pressed(on) {
     return ' aria-pressed="' + (on ? "true" : "false") + '"';
@@ -215,7 +220,8 @@ NT.app = (function () {
       };
       text = map[s.state] ? t(map[s.state], { n: s.pending }) : s.pending ? t("status.pending", { n: s.pending }) : t("status.synced");
       if (s.failed && s.state === "idle") text = t("status.failed", { n: s.failed });
-      if (s.state !== "idle" && s.state !== "syncing") tone = "warn";
+      if (s.state !== "idle" && s.state !== "syncing") tone = s.state === "error" ? "error" : "warn";
+      if (s.failed && s.state === "idle") tone = "error";
     }
     if (ui.spaceWarned) {
       text = t("space.status");
@@ -369,7 +375,7 @@ NT.app = (function () {
     var b = backup.status();
     if (b.state === "needs-permission")
       return (
-        '<div class="notice stack"><p>' +
+        '<div class="notice warn stack"><p>' +
         esc(t("backup.permissionText")) +
         '</p><button type="button" class="primary" data-act="backupReactivate">' +
         esc(t("backup.reactivate")) +
@@ -377,7 +383,7 @@ NT.app = (function () {
       );
     if (b.state === "off" && !store.sync && b.reminder !== "none")
       return (
-        '<div class="notice stack"><p>' +
+        '<div class="notice warn stack"><p>' +
         esc(t("backup.offReminder")) +
         '</p><button type="button" class="primary" data-act="backupChoose">' +
         esc(t("backup.choose")) +
@@ -385,7 +391,7 @@ NT.app = (function () {
       );
     if (b.state === "manual" && !store.sync && b.reminder !== "none")
       return (
-        '<div class="notice stack"><p>' +
+        '<div class="notice warn stack"><p>' +
         esc(t(b.reminder === "overdue" ? "backup.reminderOverdue" : "backup.reminderToday")) +
         '</p><div class="row stretch"><button type="button" class="primary" data-act="backupNow">' +
         esc(t("backup.saveNow")) +
@@ -438,12 +444,11 @@ NT.app = (function () {
       '</span><span class="meta"><span>' +
       esc(relDate(r.o.deliveryDate)) +
       " · " +
-      esc(t("stage." + r.o.stage)) +
-      " · " +
       esc(r.notes === 1 ? t("orders.oneNote") : t("orders.notesCount", { n: r.notes })) +
-      "</span>" +
+      '</span><span class="pills">' +
+      stagePill(r.o.stage) +
       pill(r.s.status) +
-      "</span></a></li>"
+      "</span></span></a></li>"
     );
   }
 
@@ -907,7 +912,7 @@ NT.app = (function () {
       "</textarea></div>";
     html += "</section>";
     html +=
-      '<div class="dock"><div><span class="hint" style="color:inherit">' +
+      '<div class="dock"><div><span class="hint">' +
       esc(t("draft.total")) +
       '</span><br /><span class="money" id="draft-total">' +
       money(draftTotal(d)) +
@@ -918,7 +923,7 @@ NT.app = (function () {
       "</button></div>";
     if (ui.confirm === "discard")
       html +=
-        '<div class="notice"><p>' +
+        '<div class="notice danger"><p>' +
         esc(t("draft.discard")) +
         '</p><div class="row"><button type="button" class="danger primary" data-act="discardYes">' +
         esc(t("draft.discardYes")) +
@@ -1117,6 +1122,8 @@ NT.app = (function () {
         '<button type="button" data-act="stage" data-path="' +
         esc(path) +
         '" data-v="' +
+        st +
+        '" data-stage="' +
         st +
         '"' +
         pressed(current === st) +
@@ -2064,7 +2071,7 @@ NT.app = (function () {
       esc(t("settings.exportFullHelp")) +
       "</p>" +
       (ui.exporting
-        ? '<p class="notice">' + esc(t("settings.exporting")) + "</p>"
+        ? '<p class="notice info">' + esc(t("settings.exporting")) + "</p>"
         : '<button type="button" class="primary" data-act="exportCsv">' +
           esc(t("settings.exportCsv")) +
           '</button><button type="button" data-act="exportSql">' +
@@ -2074,7 +2081,7 @@ NT.app = (function () {
     html += '<button type="button" data-act="export">' + esc(t("settings.export")) + "</button>";
     if (ui.importDocs)
       html +=
-        '<div class="notice stack"><div class="row stretch"><button type="button" class="primary" data-act="importMerge">' +
+        '<div class="notice warn stack"><div class="row stretch"><button type="button" class="primary" data-act="importMerge">' +
         esc(t("settings.importMerge")) +
         '</button><button type="button" class="danger" data-act="importReplace">' +
         esc(t("settings.importReplace")) +
@@ -2151,10 +2158,10 @@ NT.app = (function () {
         "</button>";
     } else {
       html += "<p>" + esc(t("backup.folder", { folder: b.folder || "" })) + "</p><p>" + esc(last) + "</p>";
-      if (b.lastError) html += '<p class="notice">' + esc(t("backup.failed", { error: b.lastError })) + "</p>";
+      if (b.lastError) html += '<p class="notice error">' + esc(t("backup.failed", { error: b.lastError })) + "</p>";
       if (b.state === "needs-permission")
         html +=
-          '<p class="notice">' +
+          '<p class="notice warn">' +
           esc(t("backup.permissionText")) +
           '</p><button type="button" class="primary" data-act="backupReactivate">' +
           esc(t("backup.reactivate")) +
@@ -2179,8 +2186,8 @@ NT.app = (function () {
     var c = NT.connection.settings();
     var session = NT.connection.session();
     var html = '<section class="sheet stack"><h2>' + esc(t("db.title")) + "</h2>";
-    if (ui.db.error) html += '<p class="notice">' + esc(ui.db.error) + "</p>";
-    if (ui.db.info) html += '<p class="notice">' + esc(ui.db.info) + "</p>";
+    if (ui.db.error) html += '<p class="notice error">' + esc(ui.db.error) + "</p>";
+    if (ui.db.info) html += '<p class="notice info">' + esc(ui.db.info) + "</p>";
 
     if (store.sync) {
       var st = store.sync.status();
@@ -2194,7 +2201,7 @@ NT.app = (function () {
         "</p>";
       if (st.state === "needs-choice")
         html +=
-          '<div class="notice stack"><h3>' +
+          '<div class="notice warn stack"><h3>' +
           esc(t("db.choiceTitle")) +
           '</h3><p class="hint">' +
           esc(t("db.choiceHelp")) +
@@ -2219,7 +2226,7 @@ NT.app = (function () {
         "</p>";
       if (ui.confirm === "disconnect")
         html +=
-          '<div class="notice stack">' +
+          '<div class="notice danger stack">' +
           (st.pending ? "<p>" + esc(t("db.disconnectPending", { n: st.pending })) + "</p>" : "") +
           '<div class="row"><button type="button" class="danger primary" data-act="disconnect">' +
           esc(t("db.disconnectConfirm")) +
@@ -2273,7 +2280,7 @@ NT.app = (function () {
   }
   function schemaSteps() {
     return (
-      '<div class="notice stack"><h3>' +
+      '<div class="notice info stack"><h3>' +
       esc(t("db.schemaTitle")) +
       "</h3><p>" +
       esc(t("db.schemaSteps")) +

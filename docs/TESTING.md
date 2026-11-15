@@ -20,6 +20,7 @@ Last verified: 2026-11-15. Status: current.
 | app_flows.test.js   | the real page in jsdom: first run, note in three steps, payments, stages, printing, production, reports, search, folding reports, export, IndexedDB reopen |
 | app_connect.test.js | database setup from Ajustes                                                                                                                                |
 | rules.test.js       | project rules: text keys, layers, purity, headers, catches, offline worker, hygiene                                                                        |
+| design.test.js      | colour standard: tokens only, documented meanings, 4.5:1 contrast, stage and payment pills, notice tones                                                   |
 
 Helpers: `helpers/load_modules.js` (modules in a sandbox), `helpers/open_app.js` (jsdom with an offline guard),
 `helpers/postgres.js` (PGlite with Supabase stand-ins), `helpers/fake_supabase.js` (Auth + PostgREST + rpc stand-in).

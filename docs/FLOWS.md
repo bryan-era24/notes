@@ -6,6 +6,11 @@ Last verified: 2026-11-15. Status: current.
   with "Expandir todo" / "Contraer todo" (decision 0011).
 - **Every screen with a list** (Pedidos, Producción, Reportes, Catálogo): the same search box under the title, × to clear, and the band
   "Solo se muestra: … · Quitar filtro" while a search is active; each screen keeps its search while the app is open.
+- **Colours** (docs/DESIGN.md): each order row shows its stage and payment status as pills with words: Pedido (plain),
+  En preparación (violet), Entregado and Recibido y firmado (green), Cancelado (grey, struck); Pendiente and Pago parcial (amber),
+  Pagado (green), Saldo a favor (teal). The chosen stage chip takes the stage's colour. The main button of each block is dark ink, blue
+  marks only what is chosen, red only deletes or failures; notices are amber (needs you), teal (information), red (failed or about to
+  delete) or green (done).
 - **Pedidos**: a backup band when needed (reactivate the folder, choose a folder, or save today's backup); "Nuevo pedido"; one search box (name, folio number, product, phone; accents optional; × clears) that searches every
   order and hides the filters while in use; filters Por entregar (default), Con saldo, Todos; groups by delivery date with counts, each group folds and unfolds (with "Expandir todo" / "Contraer todo", remembered on
   the device) and pages on its own with "Ver más";
