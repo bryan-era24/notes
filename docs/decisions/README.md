@@ -10,3 +10,5 @@
 | [0006](0006-history-keeps-changed-fields.md)  | History keeps only the fields that changed                                  |
 | [0007](0007-indexeddb-device-storage.md)      | IndexedDB on the device, localStorage as fallback                           |
 | [0008](0008-complete-export-and-sql-views.md) | Complete export (CSV, SQL) and readable views from one table definition     |
+| [0009](0009-automatic-local-backup.md)        | Automatic local backup to a folder, or a daily one-tap reminder             |
+| [0010](0010-one-search-everywhere.md)         | One search box on every screen, filtering note lines                        |

@@ -68,12 +68,23 @@ In Connected mode the export reads every document through `store.sync.fetchAll()
 `NT.logic.searchText` + `matchesSearch`: accents and case ignored, every word must match, a number alone matches a folio number exactly
 ("42" finds A-0042), four or more digits also match phones; searches folio, customer, phone, delivery date, comments, and the customers,
 products and presentations of notes that are not deleted. Product tiles in the note editor are ordered by pieces sold in the last 60 days.
+`NT.logic.filterBySearch` (Producción, Reportes, decision 0010) keeps whole orders when every word names the order, otherwise only the
+matching lines; `ordersOnly` tells Reportes whether money collected and pending can be shown. `productText` and `customerText` serve
+Catálogo.
 
-## 8. Offline
+## 8. Automatic local backup (decision 0009)
+
+States: off (folder possible, none chosen), ready, writing, needs-permission, manual (no folder support). With a folder: write
+`notas-respaldo-actual.json` 60 s after the last change and `notas-respaldo-AAAA-MM-DD.json` (overwritten during the day), then remove
+daily copies beyond the newest 14. Preferences `backup.lastAt`, `backup.lastChangeAt`, `backup.pendingSince`, `backup.folder`; the folder
+handle in IndexedDB `notas-ajustes`/`kv` under `backupFolder`. Reminder: none (no changes since the last backup, or a backup today),
+today, or overdue (changes waiting more than three days). Content: the JSON backup format of §3.
+
+## 9. Offline
 
 `sw.js` caches the app files cache-first under `VERSION`. Bump `VERSION` on every release so devices pick up the new files on
 their next open.
 
-## 9. Diagnostics
+## 10. Diagnostics
 
 Levels off (default), error, warn, info, debug; memory only; redacted by key name (`js/log.js`). `?debug=debug` for one visit.

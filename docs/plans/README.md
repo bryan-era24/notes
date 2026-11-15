@@ -7,6 +7,8 @@ Done: everything in the design (Lite, Connected, printing, sharing, production, 
 Done after: lighter history, IndexedDB storage with space warning, complete export (CSV zip, SQL) and v_* views, better order search,
 folding reports, product search and best sellers first, 40 orders per page.
 
+Also done: the same search on Pedidos, Producción, Reportes and Catálogo; automatic local backup (folder or daily reminder).
+
 Next:
 
 1. Choose the thermal printer; test "Imprimir prueba" with it and adjust js/printers.js / js/escpos.js if needed (LIM-003).

@@ -28,6 +28,14 @@ The interface is in Spanish (es-MX). Code, docs and stored field names are in En
   "Ya lo hice". The first person creates the business; others join with the six-letter code shown in Ajustes. Each device keeps the
   last 30 days (configurable) plus everything still to deliver; full history stays in the database and in Reportes.
 
+## Automatic backup
+
+Ajustes > Respaldo automático en el equipo. In Chrome or Edge (Android, computers) choose a folder once (for example Documentos): the
+app writes `notas-respaldo-actual.json` a minute after changes and one copy per day (the last 14). If the phone or the app stops
+working, copy those files from the phone to a computer and load one with Ajustes > Cargar respaldo on any device. On iPhone and other
+browsers the app reminds you each day there were changes; one tap saves the file or shares it to Drive, WhatsApp or mail.
+Connected mode is still the best protection: the data is also on the server.
+
 ## Export
 
 Ajustes > Respaldo y exportación:

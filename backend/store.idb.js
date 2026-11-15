@@ -125,3 +125,63 @@ NT.openIdbStore = function (config, hooks) {
     });
   });
 };
+
+/**
+ * A tiny key-value store in its own database ("notas-ajustes"), for things that are not data documents and cannot go to localStorage,
+ * such as the backup folder handle. Returns null when IndexedDB is not available.
+ */
+NT.idbKeyval = function () {
+  "use strict";
+  if (!NT.idbAvailable()) return null;
+  var opening = null;
+  function db() {
+    if (!opening)
+      opening = new Promise(function (resolve, reject) {
+        var r = indexedDB.open("notas-ajustes", 1);
+        r.onupgradeneeded = function () {
+          r.result.createObjectStore("kv");
+        };
+        r.onsuccess = function () {
+          resolve(r.result);
+        };
+        r.onerror = function () {
+          reject(r.error);
+        };
+      });
+    return opening;
+  }
+  function run(mode, fn) {
+    return db().then(function (d) {
+      return new Promise(function (resolve, reject) {
+        var tx = d.transaction("kv", mode);
+        var r = fn(tx.objectStore("kv"));
+        tx.oncomplete = function () {
+          resolve(r && r.result);
+        };
+        tx.onerror = function () {
+          reject(tx.error);
+        };
+        tx.onabort = function () {
+          reject(tx.error || new Error("aborted"));
+        };
+      });
+    });
+  }
+  return {
+    get: function (key) {
+      return run("readonly", function (os) {
+        return os.get(key);
+      });
+    },
+    set: function (key, value) {
+      return run("readwrite", function (os) {
+        return os.put(value, key);
+      });
+    },
+    del: function (key) {
+      return run("readwrite", function (os) {
+        return os.delete(key);
+      });
+    },
+  };
+};

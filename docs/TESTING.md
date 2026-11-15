@@ -11,6 +11,7 @@ Last verified: 2026-11-15. Status: current.
 | store_local.test.js | the store contract, atomic batches, fail closed, import/export                                                                                             |
 | store_idb.test.js   | IndexedDB: saved together, reopening, moving from localStorage, fail closed, failed save undone                                                            |
 | export.test.js      | export tables, CSV, ZIP (opened with unzip), SQL script loaded into PGlite                                                                                 |
+| backup.test.js      | automatic backup: names, 14 daily copies, reminders, folder writes, permission again, manual save                                                          |
 | views.test.js       | each v_* view equals the export for the same documents; access rules                                                                                       |
 | repo.test.js        | history in the same write, folios, note numbers, frozen prices, stages, payments, soft delete, restore                                                     |
 | demo.test.js        | demo data load and removal                                                                                                                                 |

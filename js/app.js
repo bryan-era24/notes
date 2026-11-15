@@ -15,14 +15,15 @@ NT.app = (function () {
   var esc = NT.print.escape;
   var L = NT.logic;
   var money = L.formatMoney;
-  var VERSION = "1.1.0";
+  var VERSION = "1.2.0";
 
   var store = null,
+    backup = null,
     repo = null,
     view = null;
   var ui = {
     filter: "open",
-    search: "",
+    searches: { pedidos: "", produccion: "", reportes: "", catalogo: "" },
     draft: null,
     confirm: null,
     panel: null, // "payment" | "share" | "editOrder" | "import" | ...
@@ -219,6 +220,12 @@ NT.app = (function () {
     if (ui.spaceWarned) {
       text = t("space.status");
       tone = "warn";
+    } else if (backup && !store.sync) {
+      var b = backup.status();
+      if (b.state === "needs-permission" || b.reminder === "overdue") {
+        text = t(b.state === "needs-permission" ? "backup.statusPermission" : "backup.statusOverdue");
+        tone = "warn";
+      }
     }
     el.textContent = text;
     el.setAttribute("data-tone", tone);
@@ -297,24 +304,109 @@ NT.app = (function () {
 
   // ---------- orders list ----------
   var PAGE_SIZE = 40;
+  var SEARCH_IDS = { pedidos: "order-search", produccion: "production-search", reportes: "report-search", catalogo: "catalog-search" };
+  var SEARCH_HINTS = {
+    pedidos: "orders.searchPlaceholder",
+    produccion: "production.searchPlaceholder",
+    reportes: "reports.searchPlaceholder",
+    catalogo: "catalog.search",
+  };
 
-  function ordersView() {
-    var html = '<div class="stack"><a class="btn primary big" href="#/nuevo">' + esc(t("orders.new")) + "</a>";
-    html +=
-      '<div class="searchbox"><label class="visually-hidden" for="order-search">' +
+  function query(screen) {
+    return (ui.searches[screen] || "").trim();
+  }
+  /** The same search box on every screen: type to filter, × to clear (docs/FLOWS.md). */
+  function searchBox(screen) {
+    var id = SEARCH_IDS[screen];
+    return (
+      '<div class="searchbox"><label class="visually-hidden" for="' +
+      id +
+      '">' +
       esc(t("common.search")) +
-      '</label><input id="order-search" type="search" enterkeyhint="search" autocomplete="off" data-input="search" value="' +
-      esc(ui.search) +
+      '</label><input id="' +
+      id +
+      '" type="search" enterkeyhint="search" autocomplete="off" data-input="search" data-screen="' +
+      screen +
+      '" value="' +
+      esc(ui.searches[screen] || "") +
       '" placeholder="' +
-      esc(t("orders.searchPlaceholder")) +
-      '" /><button type="button" class="quiet clear" data-act="clearSearch" aria-label="' +
+      esc(t(SEARCH_HINTS[screen])) +
+      '" /><button type="button" class="quiet clear" data-act="clearSearch" data-screen="' +
+      screen +
+      '" aria-label="' +
       esc(t("orders.clearSearch")) +
       '"' +
-      (ui.search ? "" : " hidden") +
-      ">×</button></div>";
+      (ui.searches[screen] ? "" : " hidden") +
+      ">×</button></div>"
+    );
+  }
+  /** While a search is active, a band says so, so nobody forgets the screen is filtered. */
+  function filterBanner(screen) {
+    var q = query(screen);
+    if (!q) return "";
+    return (
+      '<p class="filter-banner"><span>' +
+      esc(t("search.only", { q: q })) +
+      '</span><button type="button" class="quiet" data-act="clearSearch" data-screen="' +
+      screen +
+      '">' +
+      esc(t("search.clear")) +
+      "</button></p>"
+    );
+  }
+  function customersById() {
+    var out = {};
+    customers().forEach(function (c) {
+      out[c.id] = c;
+    });
+    return out;
+  }
+  var RESULTS = {};
+
+  /** On Pedidos: a band when the automatic backup needs a tap, or, without folder backup, when today's backup is missing. */
+  function backupBanner() {
+    if (!backup) return "";
+    var b = backup.status();
+    if (b.state === "needs-permission")
+      return (
+        '<div class="notice stack"><p>' +
+        esc(t("backup.permissionText")) +
+        '</p><button type="button" class="primary" data-act="backupReactivate">' +
+        esc(t("backup.reactivate")) +
+        "</button></div>"
+      );
+    if (b.state === "off" && !store.sync && b.reminder !== "none")
+      return (
+        '<div class="notice stack"><p>' +
+        esc(t("backup.offReminder")) +
+        '</p><button type="button" class="primary" data-act="backupChoose">' +
+        esc(t("backup.choose")) +
+        "</button></div>"
+      );
+    if (b.state === "manual" && !store.sync && b.reminder !== "none")
+      return (
+        '<div class="notice stack"><p>' +
+        esc(t(b.reminder === "overdue" ? "backup.reminderOverdue" : "backup.reminderToday")) +
+        '</p><div class="row stretch"><button type="button" class="primary" data-act="backupNow">' +
+        esc(t("backup.saveNow")) +
+        "</button>" +
+        (b.canShare ? '<button type="button" data-act="backupShare">' + esc(t("backup.share")) + "</button>" : "") +
+        "</div></div>"
+      );
+    return "";
+  }
+
+  function ordersView() {
+    var html =
+      '<div id="backup-banner">' +
+      backupBanner() +
+      '</div><div class="stack"><a class="btn primary big" href="#/nuevo">' +
+      esc(t("orders.new")) +
+      "</a>" +
+      searchBox("pedidos");
     html +=
       '<div class="chips" id="order-filters"' +
-      (ui.search.trim() ? " hidden" : "") +
+      (query("pedidos") ? " hidden" : "") +
       ">" +
       ["open", "balance", "all"]
         .map(function (f) {
@@ -330,7 +422,7 @@ NT.app = (function () {
         })
         .join("") +
       "</div></div>";
-    return html + '<div id="order-results" aria-live="polite">' + ordersResults() + "</div>";
+    return html + '<div id="results" aria-live="polite">' + ordersResults() + "</div>";
   }
 
   function stubRow(r) {
@@ -358,7 +450,7 @@ NT.app = (function () {
   /** The list under the search box: search results across every order, or the filtered list grouped by delivery date. */
   function ordersResults() {
     var snap = snapshot();
-    var q = ui.search.trim();
+    var q = query("pedidos");
     if (!snap.orders.length) {
       var noCatalog = !products().length;
       return (
@@ -405,7 +497,11 @@ NT.app = (function () {
             db = b.o.deliveryDate || b.o.localDate || "";
           return da < db ? 1 : da > db ? -1 : String(b.o.folio).localeCompare(String(a.o.folio));
         });
-      var head = '<p class="hint">' + esc(found.length === 1 ? t("orders.foundOne") : t("orders.found", { n: found.length })) + "</p>";
+      var head =
+        filterBanner("pedidos") +
+        '<p class="hint">' +
+        esc(found.length === 1 ? t("orders.foundOne") : t("orders.found", { n: found.length })) +
+        "</p>";
       if (!found.length) return head + '<p class="empty">' + esc(t("orders.notFound")) + "</p>";
       return head + '<ul class="stubs">' + found.slice(0, shown).map(stubRow).join("") + "</ul>" + more(found.length);
     }
@@ -460,6 +556,8 @@ NT.app = (function () {
     });
     return html + more(rows.length);
   }
+
+  RESULTS.pedidos = ordersResults;
 
   // ---------- note editor (new order or a note of an order) ----------
   function startDraft(spec) {
@@ -1249,8 +1347,6 @@ NT.app = (function () {
   }
   function productionView() {
     var r = prodRange();
-    var snap = snapshot();
-    var rows = L.production(snap.byId, snap.notes, r);
     var html = "<h1>" + esc(t("production.title")) + '</h1><div class="chips">';
     ["today", "tomorrow", "week", "nextWeek"].forEach(function (m) {
       html +=
@@ -1271,7 +1367,17 @@ NT.app = (function () {
       '</strong><button type="button" class="quiet" data-act="prodShift" data-v="1" aria-label="' +
       esc(t("production.next")) +
       '">›</button></div>';
-    if (!rows.length) return html + '<p class="empty">' + esc(t("production.empty")) + "</p>";
+    return html + searchBox("produccion") + '<div id="results" aria-live="polite">' + productionResults() + "</div>";
+  }
+
+  /** What to prepare in the chosen days, narrowed by the search (whole orders, or only the matching lines). */
+  function productionResults() {
+    var r = prodRange();
+    var snap = snapshot();
+    var found = L.filterBySearch(query("produccion"), snap.byId, snap.notes, customersById());
+    var rows = L.production(snap.byId, found.notes, r);
+    var html = filterBanner("produccion");
+    if (!rows.length) return html + '<p class="empty">' + esc(t(found.active ? "search.nothing" : "production.empty")) + "</p>";
     html += '<div class="pad ruled">';
     rows.forEach(function (p) {
       html += '<div class="make"><h2 style="margin:0">' + esc(p.productName) + "</h2><div>";
@@ -1301,6 +1407,7 @@ NT.app = (function () {
     html += '</div><p class="hint" style="margin-top:0.75rem">' + esc(t("production.weightNote")) + "</p>";
     return html;
   }
+  RESULTS.produccion = productionResults;
 
   // ---------- reports ----------
   function reportRange() {
@@ -1329,7 +1436,7 @@ NT.app = (function () {
       if (ui.report.online && ui.report.loading) note = t("reports.onlineLoading");
       if (ui.report.online && ui.report.error) note = t("reports.onlineFailed");
     }
-    var r = L.report(src.orders, src.notes, src.payments, range);
+    ui.reportSrc = { src: src, range: range };
     var html = "<h1>" + esc(t("reports.title")) + '</h1><div class="chips">';
     ["today", "week", "month", "lastMonth", "custom"].forEach(function (m) {
       html +=
@@ -1365,6 +1472,29 @@ NT.app = (function () {
         esc(t("reports.online")) +
         "</button></div>";
     html += '<p class="hint">' + esc(note) + "</p>";
+    return html + searchBox("reportes") + '<div id="results" aria-live="polite">' + reportsResults() + "</div>";
+  }
+
+  /**
+   * Figures and sections for the period, narrowed by the search. Money collected and pending only make sense for whole orders, so
+   * they are hidden when the search keeps only some lines (a product).
+   */
+  function reportsResults() {
+    var src = ui.reportSrc.src,
+      range = ui.reportSrc.range;
+    var found = L.filterBySearch(query("reportes"), src.orders, src.notes, customersById());
+    var keep = {};
+    found.orderIds.forEach(function (id) {
+      keep[id] = true;
+    });
+    var payments = found.active
+      ? (src.payments || []).filter(function (p) {
+          return keep[p.orderId];
+        })
+      : src.payments;
+    var r = L.report(src.orders, found.notes, payments, range);
+    var showMoney = found.ordersOnly;
+    var html = filterBanner("reportes");
     html +=
       '<div class="figures"><div class="figure"><span>' +
       esc(t("reports.sold")) +
@@ -1372,17 +1502,23 @@ NT.app = (function () {
       money(r.sold) +
       '</span><span class="hint">' +
       esc(t("reports.ordersNotes", { orders: r.orders, notes: r.notes })) +
-      '</span></div><div class="figure"><span>' +
-      esc(t("reports.collected")) +
-      '</span><span class="money">' +
-      money(r.collected) +
-      '</span></div><div class="figure pending"><span>' +
-      esc(t("reports.pending")) +
-      '</span><span class="money">' +
-      money(r.pending) +
-      "</span></div></div>";
-    if (!r.notes) return html + '<p class="empty">' + esc(t("reports.empty")) + "</p>";
-    var open = reportOpen();
+      "</span></div>" +
+      (showMoney
+        ? '<div class="figure"><span>' +
+          esc(t("reports.collected")) +
+          '</span><span class="money">' +
+          money(r.collected) +
+          '</span></div><div class="figure pending"><span>' +
+          esc(t("reports.pending")) +
+          '</span><span class="money">' +
+          money(r.pending) +
+          "</span></div>"
+        : "") +
+      "</div>";
+    if (!showMoney) html += '<p class="hint">' + esc(t("reports.moneyHidden")) + "</p>";
+    if (!r.notes) return html + '<p class="empty">' + esc(t(found.active ? "search.nothing" : "reports.empty")) + "</p>";
+    // While searching, everything with results is shown open.
+    var open = found.active ? allOpen(r) : reportOpen();
     html +=
       '<div class="row" style="margin-top:1.25rem"><button type="button" class="quiet" data-act="reportExpand" data-v="1">' +
       esc(t("reports.expandAll")) +
@@ -1441,9 +1577,9 @@ NT.app = (function () {
       esc(t("reports.colOrders")) +
       '</th><th class="num">' +
       esc(t("reports.colAmount")) +
-      '</th><th class="num">' +
-      esc(t("reports.colBalance")) +
-      "</th></tr></thead><tbody>";
+      "</th>" +
+      (showMoney ? '<th class="num">' + esc(t("reports.colBalance")) + "</th>" : "") +
+      "</tr></thead><tbody>";
     r.byCustomer.forEach(function (c) {
       cust +=
         "<tr><td>" +
@@ -1452,9 +1588,9 @@ NT.app = (function () {
         c.orders +
         '</td><td class="num">' +
         money(c.amount) +
-        '</td><td class="num">' +
-        money(Math.max(0, c.balance)) +
-        "</td></tr>";
+        "</td>" +
+        (showMoney ? '<td class="num">' + money(Math.max(0, c.balance)) + "</td>" : "") +
+        "</tr>";
     });
     cust += "</tbody></table></div>";
     html += reportSection("customer", t("reports.byCustomer"), r.byCustomer.length, cust, open);
@@ -1476,6 +1612,16 @@ NT.app = (function () {
     days += "</tbody></table>";
     html += reportSection("day", t("reports.byDay"), r.byDay.length, days, open);
     return html;
+  }
+
+  RESULTS.reportes = reportsResults;
+  /** Every section and product open: used while a search is active. */
+  function allOpen(r) {
+    var o = { product: true, customer: true, day: true };
+    r.byProduct.forEach(function (p) {
+      o["p:" + p.productId] = true;
+    });
+    return o;
   }
 
   /** Which report sections and products are open: { product, customer, day, "p:<id>" }. Sections start open. */
@@ -1531,84 +1677,79 @@ NT.app = (function () {
   }
 
   // ---------- catalog ----------
-  /** The product list of the catalog, filtered by the catalog search. */
-  function catalogList() {
-    var q = L.normalize(ui.catalogSearch || "");
-    var list = products().filter(function (p) {
-      return !q || L.normalize(p.name).indexOf(q) >= 0;
-    });
-    if (!list.length) return '<p class="hint">' + esc(t("draft.noMatch")) + "</p>";
-    var html = "";
-    html += '<ul class="stubs">';
-    list.forEach(function (p) {
-      html +=
-        '<li><a class="stub" style="grid-template-columns:1fr" href="#/producto/' +
-        encodeURIComponent(p.id) +
-        '"><span class="who' +
-        (p.active === false ? " inactive" : "") +
-        '">' +
-        esc(p.name) +
-        (p.active === false ? " · " + esc(t("catalog.inactive")) : "") +
-        '</span><span class="meta" style="grid-column:1">' +
-        (p.presentations || [])
-          .filter(function (x) {
-            return x.active !== false;
-          })
-          .map(function (x) {
-            return "<span>" + esc(x.label) + " " + money(x.price) + "</span>";
-          })
-          .join("") +
-        "</span></a></li>";
-    });
-    html += "</ul>";
-    return html;
-  }
-
   function catalogView() {
-    var list = products();
     var html =
       '<div class="section-head" style="margin-top:0"><h1 style="margin:0">' +
-      esc(t("catalog.products")) +
-      '</h1><a class="btn primary" href="#/producto/nuevo">' +
+      esc(t("nav.catalog")) +
+      '</h1><div class="row"><a class="btn primary" href="#/producto/nuevo">' +
       esc(t("catalog.addProduct")) +
-      "</a></div>";
-    if (!list.length) html += '<p class="sheet">' + esc(t("catalog.empty")) + "</p>";
-    else {
-      if (list.length > SEARCH_FROM)
-        html +=
-          '<div class="searchbox" style="margin-bottom:0.75rem"><label class="visually-hidden" for="catalog-search">' +
-          esc(t("catalog.search")) +
-          '</label><input id="catalog-search" type="search" autocomplete="off" data-input="catalogSearch" value="' +
-          esc(ui.catalogSearch || "") +
-          '" placeholder="' +
-          esc(t("catalog.search")) +
-          '" /></div>';
-      html += '<div id="catalog-list">' + catalogList() + "</div>";
-    }
-    var cs = customers();
-    html +=
-      '<div class="section-head"><h2>' +
-      esc(t("catalog.customers")) +
-      '</h2><a class="btn" href="#/cliente/nuevo">' +
+      '</a><a class="btn" href="#/cliente/nuevo">' +
       esc(t("catalog.addCustomer")) +
-      "</a></div>";
-    if (!cs.length) html += '<p class="hint">' + esc(t("common.none")) + "</p>";
-    else {
-      html += '<ul class="stubs">';
-      cs.forEach(function (c) {
-        html +=
-          '<li><a class="stub" style="grid-template-columns:1fr" href="#/cliente/' +
-          encodeURIComponent(c.id) +
-          '"><span class="who">' +
-          esc(c.name) +
-          "</span>" +
-          (c.phone ? '<span class="meta" style="grid-column:1">' + esc(c.phone) + "</span>" : "") +
-          "</a></li>";
-      });
-      html += "</ul>";
+      "</a></div></div>";
+    return html + searchBox("catalogo") + '<div id="results" aria-live="polite">' + catalogResults() + "</div>";
+  }
+
+  /** Products (name or presentation) and customers (name or phone) that match the search; empty sections hide while searching. */
+  function catalogResults() {
+    var q = query("catalogo");
+    var all = products();
+    var list = all.filter(function (p) {
+      return !q || L.matchesSearch(q, L.productText(p));
+    });
+    var cs = customers().filter(function (c) {
+      return !q || L.matchesSearch(q, L.customerText(c));
+    });
+    var html = filterBanner("catalogo");
+    if (q && !list.length && !cs.length) return html + '<p class="empty">' + esc(t("search.nothing")) + "</p>";
+    if (!q || list.length) {
+      html += '<div class="section-head"><h2>' + esc(t("catalog.products")) + " (" + list.length + ")</h2></div>";
+      if (!all.length) html += '<p class="sheet">' + esc(t("catalog.empty")) + "</p>";
+      else {
+        html += '<ul class="stubs">';
+        list.forEach(function (p) {
+          html +=
+            '<li><a class="stub" style="grid-template-columns:1fr" href="#/producto/' +
+            encodeURIComponent(p.id) +
+            '"><span class="who' +
+            (p.active === false ? " inactive" : "") +
+            '">' +
+            esc(p.name) +
+            (p.active === false ? " · " + esc(t("catalog.inactive")) : "") +
+            '</span><span class="meta" style="grid-column:1">' +
+            (p.presentations || [])
+              .filter(function (x) {
+                return x.active !== false;
+              })
+              .map(function (x) {
+                return "<span>" + esc(x.label) + " " + money(x.price) + "</span>";
+              })
+              .join("") +
+            "</span></a></li>";
+        });
+        html += "</ul>";
+      }
+    }
+    if (!q || cs.length) {
+      html += '<div class="section-head"><h2>' + esc(t("catalog.customers")) + " (" + cs.length + ")</h2></div>";
+      if (!cs.length) html += '<p class="hint">' + esc(t("common.none")) + "</p>";
+      else {
+        html += '<ul class="stubs">';
+        cs.forEach(function (c) {
+          html +=
+            '<li><a class="stub" style="grid-template-columns:1fr" href="#/cliente/' +
+            encodeURIComponent(c.id) +
+            '"><span class="who">' +
+            esc(c.name) +
+            "</span>" +
+            (c.phone ? '<span class="meta" style="grid-column:1">' + esc(c.phone) + "</span>" : "") +
+            "</a></li>";
+        });
+        html += "</ul>";
+      }
     }
     return html;
   }
+  RESULTS.catalogo = catalogResults;
 
   function productView(id) {
     var f = ui.productForm;
@@ -1822,6 +1963,7 @@ NT.app = (function () {
       esc(t("settings.testPrinter")) +
       "</button></div></section>";
 
+    html += backupSection();
     html += dbSection();
 
     html += '<section class="sheet stack"><h2>' + esc(t("settings.data")) + "</h2>";
@@ -1902,6 +2044,54 @@ NT.app = (function () {
       esc(t("settings.version", { v: VERSION })) +
       "</p></section>";
     return html;
+  }
+
+  function backupSection() {
+    if (!backup) return "";
+    var b = backup.status();
+    var last = b.lastAt ? t("backup.last", { when: fmtTime(b.lastAt) }) : t("backup.never");
+    var html = '<section class="sheet stack"><h2>' + esc(t("backup.title")) + "</h2>";
+    if (b.state === "manual") {
+      html +=
+        '<p class="hint">' +
+        esc(t("backup.manualHelp")) +
+        "</p><p>" +
+        esc(last) +
+        '</p><button type="button" class="primary" data-act="backupNow">' +
+        esc(t("backup.saveNow")) +
+        "</button>" +
+        (b.canShare ? '<button type="button" data-act="backupShare">' + esc(t("backup.share")) + "</button>" : "");
+    } else if (b.state === "off") {
+      html +=
+        '<p class="hint">' +
+        esc(t("backup.offHelp")) +
+        '</p><button type="button" class="primary" data-act="backupChoose">' +
+        esc(t("backup.choose")) +
+        "</button>";
+    } else {
+      html += "<p>" + esc(t("backup.folder", { folder: b.folder || "" })) + "</p><p>" + esc(last) + "</p>";
+      if (b.lastError) html += '<p class="notice">' + esc(t("backup.failed", { error: b.lastError })) + "</p>";
+      if (b.state === "needs-permission")
+        html +=
+          '<p class="notice">' +
+          esc(t("backup.permissionText")) +
+          '</p><button type="button" class="primary" data-act="backupReactivate">' +
+          esc(t("backup.reactivate")) +
+          "</button>";
+      else html += '<button type="button" class="primary" data-act="backupWrite">' + esc(t("backup.writeNow")) + "</button>";
+      html += '<button type="button" data-act="backupChoose">' + esc(t("backup.change")) + "</button>";
+      if (ui.confirm === "backupForget")
+        html +=
+          '<div class="row"><button type="button" class="danger primary" data-act="backupForget">' +
+          esc(t("backup.forgetConfirm")) +
+          '</button><button type="button" class="quiet" data-act="confirmNo">' +
+          esc(t("common.cancel")) +
+          "</button></div>";
+      else
+        html += '<button type="button" class="quiet" data-act="confirm" data-key="backupForget">' + esc(t("backup.forget")) + "</button>";
+      html += '<p class="hint">' + esc(t("backup.folderHelp", { keep: NT.backup.KEEP })) + "</p>";
+    }
+    return html + "</section>";
   }
 
   function dbSection() {
@@ -2095,15 +2285,16 @@ NT.app = (function () {
       ui.shown = PAGE_SIZE;
       render();
     },
-    clearSearch: function () {
-      ui.search = "";
+    clearSearch: function (el) {
+      var screen = el.getAttribute("data-screen");
+      ui.searches[screen] = "";
       ui.shown = PAGE_SIZE;
       render();
-      document.getElementById("order-search").focus();
+      document.getElementById(SEARCH_IDS[screen]).focus();
     },
     showMore: function () {
       ui.shown = (ui.shown || PAGE_SIZE) + PAGE_SIZE;
-      if (route().name === "pedidos") document.getElementById("order-results").innerHTML = ordersResults();
+      if (route().name === "pedidos") document.getElementById("results").innerHTML = ordersResults();
       else render();
     },
     demoLoad: function () {
@@ -2395,6 +2586,25 @@ NT.app = (function () {
         JSON.stringify({ app: "notas", schemaVersion: 1, exportedAt: new Date().toISOString(), data: store.exportAll() }, null, 1)
       );
     },
+    backupChoose: function () {
+      backup.chooseFolder().then(afterBackup, backupFailed);
+    },
+    backupReactivate: function () {
+      backup.reactivate().then(afterBackup, backupFailed);
+    },
+    backupWrite: function () {
+      backup.writeNow().then(afterBackup, backupFailed);
+    },
+    backupNow: function () {
+      backup.saveNow().then(afterBackup, backupFailed);
+    },
+    backupShare: function () {
+      backup.shareNow().then(afterBackup, backupFailed);
+    },
+    backupForget: function () {
+      ui.confirm = null;
+      backup.forget().then(afterBackup, backupFailed);
+    },
     exportCsv: function () {
       fullExport(function (tables, stamp) {
         download(
@@ -2526,6 +2736,16 @@ NT.app = (function () {
     NT.log.error("ui.action_failed", { error: e });
     toast(problemText(e));
   }
+  function afterBackup(st) {
+    if (st && st.lastAt && st.state !== "needs-permission" && !st.lastError) toast(t("backup.done"));
+    render();
+  }
+  function backupFailed(e) {
+    // A closed folder picker or share sheet is not an error.
+    if (e && e.name === "AbortError") return;
+    failToast(e);
+  }
+
   /** Builds the complete export: in Connected mode from the whole database (falling back to this device), else from this device. */
   function fullExport(save) {
     if (ui.exporting) return;
@@ -2564,11 +2784,13 @@ NT.app = (function () {
   // ---------- inputs and forms ----------
   var inputs = {
     search: function (el) {
-      ui.search = el.value;
+      var screen = el.getAttribute("data-screen");
+      ui.searches[screen] = el.value;
       ui.shown = PAGE_SIZE;
-      document.getElementById("order-results").innerHTML = ordersResults();
-      view.querySelector('[data-act="clearSearch"]').hidden = !ui.search;
-      document.getElementById("order-filters").hidden = !!ui.search.trim();
+      document.getElementById("results").innerHTML = RESULTS[screen]();
+      view.querySelector('[data-act="clearSearch"][data-screen="' + screen + '"]').hidden = !el.value;
+      var filters = document.getElementById("order-filters");
+      if (filters) filters.hidden = !!el.value.trim();
     },
     draftSearch: function (el) {
       var d = ui.draft;
@@ -2594,10 +2816,6 @@ NT.app = (function () {
     productSearch: function (el) {
       ui.draft.productSearch = el.value;
       document.getElementById("draft-tiles").innerHTML = draftTiles(ui.draft);
-    },
-    catalogSearch: function (el) {
-      ui.catalogSearch = el.value;
-      document.getElementById("catalog-list").innerHTML = catalogList();
     },
     draftComment: function (el) {
       ui.draft.comment = el.value;
@@ -2888,6 +3106,69 @@ NT.app = (function () {
     }
   }
 
+  /** The automatic backup: a folder where the browser allows it (Chrome, Edge), otherwise a daily reminder (js/backup.js). */
+  function startBackup() {
+    var canPick = typeof window.showDirectoryPicker === "function" && window.self === window.top;
+    var canShareFiles = false;
+    try {
+      canShareFiles =
+        typeof navigator !== "undefined" &&
+        !!navigator.canShare &&
+        navigator.canShare({ files: [new File(["{}"], "x.json", { type: "application/json" })] });
+    } catch {
+      // catch-ok: browsers without File or canShare simply cannot share files.
+      canShareFiles = false;
+    }
+    backup = NT.backup.create({
+      now: NT.clock.now,
+      today: NT.clock.today,
+      exportAll: function () {
+        return store.exportAll();
+      },
+      prefs: NT.prefs,
+      handles: NT.idbKeyval ? NT.idbKeyval() : null,
+      pickFolder: canPick
+        ? function () {
+            return window.showDirectoryPicker({ id: "notas-respaldo", mode: "readwrite", startIn: "documents" });
+          }
+        : null,
+      setTimeout: function (fn, ms) {
+        return setTimeout(fn, ms);
+      },
+      clearTimeout: function (id) {
+        clearTimeout(id);
+      },
+      download: function (name, text) {
+        download(name, text);
+      },
+      share: canShareFiles
+        ? function (name, text) {
+            var file = new File([text], name, { type: "application/json" });
+            return navigator.share({ files: [file], title: name }).then(
+              function () {
+                return true;
+              },
+              function (e) {
+                if (e && e.name === "AbortError") return false;
+                throw e;
+              }
+            );
+          }
+        : null,
+      onStatus: function () {
+        statusLine();
+        var el = document.getElementById("backup-banner");
+        if (el) el.innerHTML = backupBanner();
+      },
+    });
+    backup.init().then(statusLine, function (e) {
+      NT.log.warn("backup.init_failed", { error: e });
+    });
+    store.onChange(function () {
+      backup.noteChange();
+    });
+  }
+
   /** Asks the browser to keep this site's data (not clear it under pressure) and checks how full storage is. */
   function protectStorage() {
     var st = typeof navigator !== "undefined" && navigator.storage;
@@ -2981,6 +3262,7 @@ NT.app = (function () {
       if (store.corrupt) return failClosed(store.raw);
       if (store.failed) return failClosed(null);
       repo = NT.repo.create(store, { now: NT.clock.now, today: NT.clock.today, uuid: NT.clock.uuid, by: by, deviceCode: deviceCode });
+      startBackup();
       wire();
       render();
       registerWorker();

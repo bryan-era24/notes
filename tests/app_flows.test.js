@@ -185,11 +185,11 @@ test("[TC-PED-04-02] the order search finds by name without accents, by folio nu
   const app = await openApp();
   await app.click('[data-act="demoLoad"]');
   await app.waitFor(() => app.window.document.querySelectorAll(".stub").length > 3, 6000);
-  const results = () => [...app.window.document.querySelectorAll("#order-results .stub .folio")].map((e) => e.textContent);
+  const results = () => [...app.window.document.querySelectorAll("#results .stub .folio")].map((e) => e.textContent);
   app.$("order-search").focus();
   await app.type("#order-search", "esquina");
   assert.ok(results().length >= 1);
-  assert.ok(app.byText("#order-results .stub", /Esquina/));
+  assert.ok(app.byText("#results .stub", /Esquina/));
   await app.type("#order-search", "10");
   assert.deepEqual(results(), ["A-0010"]);
   await app.type("#order-search", "dona carmen");
@@ -245,4 +245,98 @@ test("[TC-EXP-04-01] Ajustes exports everything as a ZIP of CSVs and as a Postgr
   assert.match(sql, /create schema if not exists notas_export;/);
   assert.match(sql, /insert into notas_export\.renglones/);
   assert.match(app.text(), /Espacio usado/);
+});
+
+test("[TC-PRO-03-02] the same search works on Producción, Reportes and Catálogo, with a band while filtering and memory per screen", async () => {
+  const app = await openApp();
+  await app.click('[data-act="demoLoad"]');
+  await app.waitFor(() => app.window.document.querySelectorAll(".stub").length > 3, 6000);
+
+  // Producción this week: caramel only.
+  await app.go("#/produccion");
+  await app.click('[data-act="prodMode"][data-v="week"]');
+  const before = app.window.document.querySelectorAll(".make").length;
+  assert.ok(before >= 3);
+  app.$("production-search").focus();
+  await app.type("#production-search", "caramelo");
+  const names = () => [...app.window.document.querySelectorAll(".make h2")].map((h) => h.textContent);
+  assert.deepEqual(names(), ["Palomitas de caramelo"]);
+  assert.match(app.$("results").textContent, /Solo se muestra: «caramelo»/);
+  assert.equal(app.window.document.activeElement.id, "production-search");
+  // By customer: every product of that customer's orders.
+  await app.type("#production-search", "fiestas");
+  assert.ok(names().includes("Charola para evento"));
+
+  // Reportes: a product hides money collected; a customer shows it.
+  await app.go("#/reportes");
+  await app.type("#report-search", "caramelo");
+  assert.match(app.$("results").textContent, /no se muestran al buscar un producto/);
+  const figures = () => app.window.document.querySelectorAll("#results .figure").length;
+  assert.equal(figures(), 1, "only Vendido");
+  assert.doesNotMatch(app.$("results").querySelector("table.data thead").textContent, /Saldo/);
+  await app.type("#report-search", "doña carmen");
+  assert.equal(figures(), 3, "Vendido, Cobrado and Por cobrar for whole orders");
+  assert.ok(
+    [...app.window.document.querySelectorAll("details[data-fold]")].every((d) => d.open),
+    "results shown open"
+  );
+
+  // Catálogo: products and customers in one box.
+  await app.go("#/catalogo");
+  await app.type("#catalog-search", "charola");
+  assert.match(app.$("results").textContent, /Productos \(1\)/);
+  assert.doesNotMatch(app.$("results").textContent, /Clientes/);
+  await app.type("#catalog-search", "0000 0003");
+  assert.match(app.$("results").textContent, /Clientes \(1\)/);
+
+  // Each screen keeps its own search while the app is open; "Quitar filtro" clears it.
+  await app.go("#/produccion");
+  assert.equal(app.$("production-search").value, "fiestas");
+  await app.click('.filter-banner [data-act="clearSearch"]');
+  assert.equal(app.$("production-search").value, "");
+  assert.equal(app.window.document.querySelector(".filter-banner"), null);
+  await app.go("#/pedidos");
+  assert.equal(app.$("order-search").value, "");
+});
+
+test("[TC-BAK-04-01] without folder support, Pedidos reminds after changes and one tap saves today's backup", async () => {
+  const app = await openApp();
+  await app.click('[data-act="demoLoad"]');
+  await app.waitFor(() => app.window.document.querySelector('#backup-banner [data-act="backupNow"]'), 6000);
+  assert.match(app.$("backup-banner").textContent, /Guarda el respaldo de hoy/);
+  await app.click('#backup-banner [data-act="backupNow"]');
+  assert.match(app.downloads[0].name, /^notas-respaldo-\d{4}-\d{2}-\d{2}\.json$/);
+  assert.equal(JSON.parse(await app.downloadText(0)).app, "notas");
+  await app.waitFor(() => app.$("backup-banner").textContent === "");
+});
+
+test("[TC-BAK-04-02] with folder support, Ajustes chooses a folder and the backup files appear there", async () => {
+  const files = new Map();
+  const dir = {
+    kind: "directory",
+    name: "Notas-respaldo",
+    queryPermission: async () => "granted",
+    requestPermission: async () => "granted",
+    getFileHandle: async (name) => ({
+      createWritable: async () => {
+        let buf = "";
+        return { write: async (d) => void (buf += d), close: async () => void files.set(name, buf) };
+      },
+    }),
+    removeEntry: async (name) => void files.delete(name),
+    values: async function* () {
+      for (const name of [...files.keys()]) yield { kind: "file", name };
+    },
+  };
+  const app = await openApp({ setup: (w) => (w.showDirectoryPicker = async () => dir) });
+  await app.click('[data-act="demoLoad"]');
+  await app.waitFor(() => app.window.document.querySelectorAll(".stub").length > 3, 6000);
+  await app.waitFor(() => app.window.document.querySelector('#backup-banner [data-act="backupChoose"]'));
+  await app.click('#backup-banner [data-act="backupChoose"]');
+  await app.waitFor(() => files.has("notas-respaldo-actual.json"));
+  assert.ok([...files.keys()].some((n) => /^notas-respaldo-\d{4}-\d{2}-\d{2}\.json$/.test(n)));
+  assert.ok(Object.keys(JSON.parse(files.get("notas-respaldo-actual.json")).data).some((k) => k.startsWith("orders/")));
+  await app.waitFor(() => app.$("backup-banner").textContent === "");
+  await app.go("#/ajustes");
+  assert.match(app.text(), /Respaldando en la carpeta «Notas-respaldo»/);
 });

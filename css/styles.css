@@ -116,6 +116,24 @@ a {
   font-size: 1.6rem;
   border: 0;
 }
+.filter-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.5rem 0.5rem 1rem;
+  background: var(--warn-soft);
+  border-left: 4px solid var(--warn);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-weight: 700;
+}
+.filter-banner button {
+  min-height: 2.9rem;
+  border-color: var(--warn);
+  color: var(--warn);
+}
 .skip {
   position: absolute;
   left: -999px;

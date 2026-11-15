@@ -392,6 +392,61 @@ NT.logic = (function () {
     });
   }
 
+  /** Searchable text of a catalog product (name and presentations) and of a customer (name and phone). */
+  function productText(p) {
+    var parts = [p.name].concat(
+      (p.presentations || []).map(function (x) {
+        return x.label;
+      })
+    );
+    var text = normalize(parts.join(" | "));
+    return " " + text + " " + text.replace(/\s/g, "") + " ";
+  }
+  function customerText(c) {
+    var text = normalize([c.name, c.phone, c.comment].filter(Boolean).join(" | "));
+    return " " + text + " " + text.replace(/\s/g, "") + " ";
+  }
+
+  /**
+   * Narrows notes to what a search names, for production and reports. When every word matches an order (customer, folio, phone,
+   * comment) the whole order is kept; otherwise only the lines whose product or presentation, together with their order, match every
+   * word. Returns { active, notes, orderIds, ordersOnly } where ordersOnly means whole orders were kept, so money collected and
+   * pending can be shown for them. customers: { id: customer } for phones.
+   */
+  function filterBySearch(query, orders, notes, customers) {
+    var words = normalize(query).split(" ").filter(Boolean);
+    if (!words.length) return { active: false, notes: notes, orderIds: Object.keys(orders), ordersOnly: true };
+    var keptOrders = {},
+      ordersOnly = true,
+      out = [];
+    var orderTextCache = {};
+    function orderText(id) {
+      if (!(id in orderTextCache)) {
+        var o = orders[id] || {};
+        orderTextCache[id] = searchText(o, [], customers && customers[o.customerId]);
+      }
+      return orderTextCache[id];
+    }
+    (notes || []).forEach(function (n) {
+      var ot = orderText(n.orderId);
+      var noteText = " " + normalize([n.customerName, n.comment].filter(Boolean).join(" ")) + " ";
+      if (matchesSearch(query, ot + noteText)) {
+        out.push(n);
+        keptOrders[n.orderId] = true;
+        return;
+      }
+      var lines = (n.lines || []).filter(function (l) {
+        return matchesSearch(query, ot + noteText + " " + normalize(l.productName + " " + l.presentationLabel) + " ");
+      });
+      if (lines.length) {
+        ordersOnly = false;
+        out.push(Object.assign({}, n, { lines: lines }));
+        keptOrders[n.orderId] = true;
+      }
+    });
+    return { active: true, notes: out, orderIds: Object.keys(keptOrders), ordersOnly: ordersOnly };
+  }
+
   /** { productId: pieces } sold in notes that count, made on or after `from` (order date). For putting best sellers first. */
   function productRanking(notes, from) {
     var out = {};
@@ -591,6 +646,9 @@ NT.logic = (function () {
     searchText: searchText,
     matchesSearch: matchesSearch,
     productRanking: productRanking,
+    productText: productText,
+    customerText: customerText,
+    filterBySearch: filterBySearch,
     validateProduct: validateProduct,
     validateNote: validateNote,
     validateOrder: validateOrder,

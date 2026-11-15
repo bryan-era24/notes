@@ -18,3 +18,7 @@ Last verified: 2026-11-15. Status: current.
 | LIM-012 | Undo from history puts back the fields of one change                                  | Undoing an older change after later edits to the same fields overwrites those later values    |
 | LIM-013 | CSV times (creado, pagado_en, fecha_hora) are in UTC                                  | Excel shows them six hours ahead of Guadalajara; the date columns are local                   |
 | LIM-014 | Search covers the orders on this device                                               | In Connected mode older orders outside the window are in the export or the v_* views          |
+| LIM-015 | Writing the backup to a folder works only in Chrome and Edge (Android, computers)     | iPhone, Firefox and others get a daily one-tap reminder instead                               |
+| LIM-016 | The browser may ask again for the backup folder permission when the app reopens       | Pedidos shows "Toca para reactivar el respaldo"; until tapped, nothing is written             |
+| LIM-017 | The local backup file is not encrypted                                                | Anyone with the phone's files can read customer names and phones in it                        |
+| LIM-018 | A dead phone whose storage cannot be read also loses its local backup                 | Use Connected mode or share the backup off the phone                                          |

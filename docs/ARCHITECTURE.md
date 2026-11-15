@@ -25,6 +25,7 @@ backend/schema_sql.js    copy of db/schema.sql for the setup screen (generated)
 js/repo.js       the only writer: validation, stamps, history, folios, soft delete, restore
 js/demo.js       demonstration data
 js/export.js     PURE complete export: tables, CSV, ZIP, PostgreSQL script
+js/backup.js     automatic local backup (folder or reminder); folder, timers and preferences come in through env
 js/app.js        screens and actions; starts the app
 db/schema.sql    PostgreSQL schema for Connected mode
 ```

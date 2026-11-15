@@ -319,6 +319,9 @@ folding reports. Built as: IndexedDB storage (decision 0007), lighter history (0
 and best sellers first, complete export as CSV zip and SQL script plus readable v_* views in the database (0008), one search box that
 ignores accents and finds folios by number, and report sections that fold with "Expandir todo" / "Contraer todo".
 
+Then: one search box on every screen that filters note lines and recalculates (decision 0010), and an automatic local backup to a
+folder chosen once, or a daily one-tap reminder where browsers cannot write folders (decision 0009).
+
 ## 15. Left to the builder
 
 File and module names, exact colors and spacing within the visual rules above, sync timings (start

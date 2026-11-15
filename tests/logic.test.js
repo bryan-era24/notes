@@ -318,3 +318,51 @@ test("[TC-CAT-03-01] products ranked by how much they sold since a date", () => 
   ];
   assert.deepEqual(L.productRanking(notes, "2026-10-01"), { a: 65, b: 50 });
 });
+
+test("[TC-PRO-03-01] search keeps whole orders when every word names the order, otherwise only the matching lines", () => {
+  const orders = {
+    o1: order({ folio: "A-0042", customerName: "Doña Carmen" }),
+    o2: order({ folio: "A-0043", customerName: "Tienda La Esquina" }),
+  };
+  const notes = [
+    note({
+      orderId: "o1",
+      lines: [line({ productName: "Palomitas de caramelo", qty: 2 }), line({ id: "b", productName: "Palomitas de mantequilla", qty: 3 })],
+    }),
+    note({ orderId: "o2", lines: [line({ productName: "Palomitas de caramelo", qty: 5 })] }),
+  ];
+  const byCustomer = L.filterBySearch("carmen", orders, notes, {});
+  assert.equal(byCustomer.ordersOnly, true);
+  assert.deepEqual(byCustomer.orderIds, ["o1"]);
+  assert.equal(byCustomer.notes.length, 1);
+  assert.equal(byCustomer.notes[0].lines.length, 2, "the whole order");
+
+  const byProduct = L.filterBySearch("caramelo", orders, notes, {});
+  assert.equal(byProduct.ordersOnly, false);
+  assert.equal(byProduct.notes.length, 2);
+  assert.ok(byProduct.notes.every((n) => n.lines.length === 1 && /caramelo/.test(n.lines[0].productName)));
+
+  const both = L.filterBySearch("carmen caramelo", orders, notes, {});
+  assert.equal(both.notes.length, 1);
+  assert.equal(both.notes[0].lines.length, 1);
+  assert.equal(both.notes[0].lines[0].qty, 2);
+
+  const folio = L.filterBySearch("43", orders, notes, {});
+  assert.deepEqual(folio.orderIds, ["o2"]);
+  assert.equal(folio.ordersOnly, true);
+
+  const none = L.filterBySearch("", orders, notes, {});
+  assert.equal(none.notes, notes);
+  assert.equal(none.ordersOnly, true);
+  assert.equal(none.active, false);
+});
+
+test("[TC-CAT-03-02] catalog search matches product names and presentations, and customers by name or phone", () => {
+  const p = { name: "Palomitas de caramelo", presentations: [{ label: "Bolsa fiesta" }] };
+  assert.ok(L.matchesSearch("fiesta", L.productText(p)));
+  assert.ok(L.matchesSearch("caramelo bolsa", L.productText(p)));
+  assert.ok(!L.matchesSearch("mantequilla", L.productText(p)));
+  const c = { name: "Doña Carmen", phone: "33 1234 5678" };
+  assert.ok(L.matchesSearch("dona", L.customerText(c)));
+  assert.ok(L.matchesSearch("5678", L.customerText(c)));
+});
