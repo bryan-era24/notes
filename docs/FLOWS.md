@@ -5,8 +5,9 @@ Last verified: 2026-11-15. Status: current.
 - **Every screen with a list** (Pedidos, Producción, Reportes, Catálogo): the same search box under the title, × to clear, and the band
   "Solo se muestra: … · Quitar filtro" while a search is active; each screen keeps its search while the app is open.
 - **Pedidos**: a backup band when needed (reactivate the folder, choose a folder, or save today's backup); "Nuevo pedido"; one search box (name, folio number, product, phone; accents optional; × clears) that searches every
-  order and hides the filters while in use; filters Por entregar (default), Con saldo, Todos; groups by delivery date with counts;
-  40 orders at a time with "Ver más". Empty first run offers the catalog and demo data.
+  order and hides the filters while in use; filters Por entregar (default), Con saldo, Todos; groups by delivery date with counts, each group folds and unfolds (with "Expandir todo" / "Contraer todo", remembered on
+  the device) and pages on its own with "Ver más";
+  40 orders per group at a time. Empty first run offers the catalog and demo data.
 - **Note editor products**: best sellers first; with more than 12 products a search box filters the tiles. Catálogo has the same search.
 - **New order**: 1) customer (search, pick, type a new name, or "Sin nombre") and delivery date (Hoy, Mañana, Pasado mañana, other); 2) products: tap a product (one presentation adds it at once; several show buttons), adjust with − / + or type the quantity, adjust
   the price per piece if needed; 3) "Guardar nota". A new name creates the customer.

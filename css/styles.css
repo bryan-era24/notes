@@ -788,6 +788,39 @@ table.data .sub td {
   color: var(--ink-soft);
   font-size: var(--size-small);
 }
+.order-group > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--tap);
+  cursor: pointer;
+}
+.order-group > summary::-webkit-details-marker {
+  display: none;
+}
+.order-group > summary::before {
+  content: "▸";
+  font-size: 1.2rem;
+  color: var(--pen);
+  width: 1.25rem;
+  transition: transform 0.12s;
+}
+.order-group[open] > summary::before {
+  transform: rotate(90deg);
+}
+.order-group > summary .group-title {
+  margin: 0;
+}
+.order-group + .order-group {
+  margin-top: 0.5rem;
+}
+.order-group > .big {
+  margin-top: 0.5rem;
+}
+.fold-tools {
+  margin: 0.75rem 0 0.25rem;
+}
 .report-section {
   margin-top: 1rem;
 }

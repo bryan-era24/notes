@@ -533,31 +533,63 @@ NT.app = (function () {
                 : "later";
       groups[g].push(r);
     });
-    var html = "",
-      left = shown;
+    var folds = ordersFold();
+    var html =
+      '<div class="row fold-tools"><button type="button" class="quiet" data-act="foldAll" data-set="orders" data-v="1">' +
+      esc(t("reports.expandAll")) +
+      '</button><button type="button" class="quiet" data-act="foldAll" data-set="orders" data-v="0">' +
+      esc(t("reports.collapseAll")) +
+      "</button></div>";
     ["late", "today", "tomorrow", "week", "later", "noDate", "past"].forEach(function (g) {
-      if (!groups[g].length || left <= 0) return;
+      if (!groups[g].length) return;
       groups[g].sort(function (a, b) {
         var da = a.o.deliveryDate || "9999",
           db = b.o.deliveryDate || "9999";
         if (g === "past") return da < db ? 1 : da > db ? -1 : 0;
         return da < db ? -1 : da > db ? 1 : String(a.o.folio).localeCompare(String(b.o.folio));
       });
-      var part = groups[g].slice(0, left);
-      left -= part.length;
+      // Each group pages on its own, so a folded group never hides orders of the others.
+      var limit = (ui.shownByGroup && ui.shownByGroup[g]) || PAGE_SIZE;
+      var part = groups[g].slice(0, limit);
+      var left = groups[g].length - part.length;
       html +=
-        '<h2 class="group-title">' +
+        '<details class="order-group" data-fold-set="orders" data-fold="g:' +
+        g +
+        '"' +
+        (folds["g:" + g] === false ? "" : " open") +
+        '><summary><h2 class="group-title">' +
         esc(t("orders.group." + g)) +
         " (" +
         groups[g].length +
-        ')</h2><ul class="stubs">' +
+        ')</h2></summary><ul class="stubs">' +
         part.map(stubRow).join("") +
-        "</ul>";
+        "</ul>" +
+        (left > 0
+          ? '<button type="button" class="quiet big" data-act="showMore" data-group="' +
+            g +
+            '">' +
+            esc(t("orders.showMore", { n: Math.min(PAGE_SIZE, left), left: left })) +
+            "</button>"
+          : "") +
+        "</details>";
     });
-    return html + more(rows.length);
+    return html;
   }
 
   RESULTS.pedidos = ordersResults;
+
+  /** Which order groups are folded on this device: { "g:<group>": false } (groups start open). */
+  function ordersFold() {
+    if (!ui.ordersFold) {
+      try {
+        ui.ordersFold = JSON.parse(NT.prefs.get("ordersFold") || "null") || {};
+      } catch {
+        // catch-ok: an unreadable preference starts with every group open.
+        ui.ordersFold = {};
+      }
+    }
+    return ui.ordersFold;
+  }
 
   // ---------- note editor (new order or a note of an order) ----------
   function startDraft(spec) {
@@ -1638,6 +1670,10 @@ NT.app = (function () {
     }
     return ui.reportOpen;
   }
+  function saveFolds(set) {
+    if (set === "orders") NT.prefs.set("ordersFold", JSON.stringify(ui.ordersFold));
+    else saveReportOpen();
+  }
   function saveReportOpen() {
     NT.prefs.set("reportOpen", JSON.stringify(ui.reportOpen));
   }
@@ -2292,8 +2328,12 @@ NT.app = (function () {
       render();
       document.getElementById(SEARCH_IDS[screen]).focus();
     },
-    showMore: function () {
-      ui.shown = (ui.shown || PAGE_SIZE) + PAGE_SIZE;
+    showMore: function (el) {
+      var g = el.getAttribute("data-group");
+      if (g) {
+        ui.shownByGroup = ui.shownByGroup || {};
+        ui.shownByGroup[g] = (ui.shownByGroup[g] || PAGE_SIZE) + PAGE_SIZE;
+      } else ui.shown = (ui.shown || PAGE_SIZE) + PAGE_SIZE;
       if (route().name === "pedidos") document.getElementById("results").innerHTML = ordersResults();
       else render();
     },
@@ -2517,10 +2557,20 @@ NT.app = (function () {
       ui.report.mode = el.getAttribute("data-v");
       render();
     },
+    foldAll: function (el) {
+      var on = el.getAttribute("data-v") === "1";
+      var set = el.getAttribute("data-set");
+      var state = set === "orders" ? ordersFold() : reportOpen();
+      view.querySelectorAll('details[data-fold-set="' + set + '"]').forEach(function (d) {
+        d.open = on;
+        state[d.getAttribute("data-fold")] = on;
+      });
+      saveFolds(set);
+    },
     reportExpand: function (el) {
       var on = el.getAttribute("data-v") === "1";
       var open = reportOpen();
-      view.querySelectorAll("details[data-fold]").forEach(function (d) {
+      view.querySelectorAll("details[data-fold]:not([data-fold-set])").forEach(function (d) {
         d.open = on;
         open[d.getAttribute("data-fold")] = on;
       });
@@ -3037,8 +3087,9 @@ NT.app = (function () {
       function (e) {
         var key = e.target && e.target.getAttribute && e.target.getAttribute("data-fold");
         if (!key) return;
-        reportOpen()[key] = e.target.open;
-        saveReportOpen();
+        var set = e.target.getAttribute("data-fold-set") || "report";
+        (set === "orders" ? ordersFold() : reportOpen())[key] = e.target.open;
+        saveFolds(set);
       },
       true
     );

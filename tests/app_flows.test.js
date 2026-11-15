@@ -340,3 +340,34 @@ test("[TC-BAK-04-02] with folder support, Ajustes chooses a folder and the backu
   await app.go("#/ajustes");
   assert.match(app.text(), /Respaldando en la carpeta «Notas-respaldo»/);
 });
+
+test("[TC-PED-05-01] order groups (Hoy, Mañana, Próximos 7 días, Más adelante) fold one by one or all at once, and stay as left", async () => {
+  const app = await openApp();
+  await app.click('[data-act="demoLoad"]');
+  await app.waitFor(() => app.window.document.querySelectorAll(".stub").length > 3, 6000);
+  const groups = () => [...app.window.document.querySelectorAll('details[data-fold-set="orders"]')];
+  const keys = groups().map((d) => d.getAttribute("data-fold"));
+  assert.ok(
+    ["g:today", "g:tomorrow", "g:week"].every((k) => keys.includes(k)),
+    keys.join()
+  );
+  assert.ok(
+    groups().every((d) => d.open),
+    "groups start open"
+  );
+  await app.click('[data-act="foldAll"][data-set="orders"][data-v="0"]');
+  assert.ok(groups().every((d) => !d.open));
+  assert.match(app.text(), /Mañana \(\d+\)/, "the title with its count stays visible");
+  const tomorrow = app.window.document.querySelector('details[data-fold="g:tomorrow"]');
+  tomorrow.open = true;
+  tomorrow.dispatchEvent(new app.window.Event("toggle"));
+  await app.go("#/produccion");
+  await app.go("#/pedidos");
+  assert.equal(app.window.document.querySelector('details[data-fold="g:tomorrow"]').open, true);
+  assert.equal(app.window.document.querySelector('details[data-fold="g:week"]').open, false);
+  await app.click('[data-act="foldAll"][data-set="orders"][data-v="1"]');
+  assert.ok(groups().every((d) => d.open));
+  // Report folds are separate.
+  await app.go("#/reportes");
+  assert.ok(app.window.document.querySelector('details[data-fold="product"]').open);
+});
