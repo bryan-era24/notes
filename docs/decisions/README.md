@@ -12,3 +12,4 @@
 | [0008](0008-complete-export-and-sql-views.md) | Complete export (CSV, SQL) and readable views from one table definition     |
 | [0009](0009-automatic-local-backup.md)        | Automatic local backup to a folder, or a daily one-tap reminder             |
 | [0010](0010-one-search-everywhere.md)         | One search box on every screen, filtering note lines                        |
+| [0011](0011-everything-that-groups-folds.md)  | Everything that groups folds the same way                                   |

@@ -788,6 +788,65 @@ table.data .sub td {
   color: var(--ink-soft);
   font-size: var(--size-small);
 }
+.foldable > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  min-height: var(--tap);
+}
+.foldable > summary::-webkit-details-marker {
+  display: none;
+}
+.foldable > summary::before {
+  content: "▸";
+  font-size: 1.2rem;
+  color: var(--pen);
+  width: 1.25rem;
+  flex: none;
+  transition: transform 0.12s;
+}
+.foldable[open] > summary::before {
+  transform: rotate(90deg);
+}
+.foldable > summary.section-head {
+  margin: 1.25rem 0 0.6rem;
+  justify-content: flex-start;
+}
+.make-fold > summary.make {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+}
+.make-fold > summary.make::before {
+  grid-row: 1;
+}
+.make-body {
+  padding: 0 0 0.25rem 1.75rem;
+}
+.make-body ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.make-body li {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px dashed var(--rule);
+  padding: 0.3rem 0;
+}
+.note-block > summary.note-title {
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--rule);
+  justify-content: flex-start;
+}
+.note-block > summary.note-title h3 {
+  flex: 1;
+}
+.note-block + .note-block {
+  margin-top: 0.75rem;
+}
 .order-group > summary {
   list-style: none;
   display: flex;

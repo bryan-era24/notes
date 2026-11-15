@@ -215,9 +215,9 @@ test("[TC-REP-03-01] report sections fold and unfold one by one or all at once, 
       .filter((d) => d.classList.contains("report-section"))
       .every((d) => d.open)
   );
-  await app.click('[data-act="reportExpand"][data-v="0"]');
+  await app.click('[data-act="foldAll"][data-set="report"][data-v="0"]');
   assert.ok(folds().every((d) => !d.open));
-  await app.click('[data-act="reportExpand"][data-v="1"]');
+  await app.click('[data-act="foldAll"][data-set="report"][data-v="1"]');
   assert.ok(folds().every((d) => d.open));
   const day = app.window.document.querySelector('details[data-fold="day"]');
   day.open = false;
@@ -370,4 +370,60 @@ test("[TC-PED-05-01] order groups (Hoy, Mañana, Próximos 7 días, Más adelant
   // Report folds are separate.
   await app.go("#/reportes");
   assert.ok(app.window.document.querySelector('details[data-fold="product"]').open);
+});
+
+test("[TC-NFR-06-01] everything that groups folds: Producción products, Catálogo sections and the notes and payments of an order", async () => {
+  const app = await openApp();
+  await app.click('[data-act="demoLoad"]');
+  await app.waitFor(() => app.window.document.querySelectorAll(".stub").length > 3, 6000);
+  const folds = (set) => [...app.window.document.querySelectorAll(`details[data-fold-set="${set}"]`)];
+  const foldAll = (set, on) => app.click(`[data-act="foldAll"][data-set="${set}"][data-v="${on ? 1 : 0}"]`);
+
+  // Producción: one fold per product; the title keeps its kg and pieces.
+  await app.go("#/produccion");
+  await app.click('[data-act="prodMode"][data-v="week"]');
+  assert.ok(folds("production").length >= 3);
+  assert.ok(folds("production").every((d) => d.open));
+  await foldAll("production", false);
+  assert.ok(folds("production").every((d) => !d.open));
+  assert.match(folds("production")[0].querySelector("summary").textContent, /pzas/);
+  await app.go("#/catalogo");
+  await app.go("#/produccion");
+  await app.click('[data-act="prodMode"][data-v="week"]');
+  assert.ok(
+    folds("production").every((d) => !d.open),
+    "remembered"
+  );
+  await app.type("#production-search", "caramelo");
+  assert.ok(
+    folds("production").every((d) => d.open),
+    "search results show open"
+  );
+  await app.click('.filter-banner [data-act="clearSearch"]');
+  await foldAll("production", true);
+
+  // Catálogo: Productos and Clientes.
+  await app.go("#/catalogo");
+  assert.deepEqual(
+    folds("catalog").map((d) => d.getAttribute("data-fold")),
+    ["products", "customers"]
+  );
+  await foldAll("catalog", false);
+  assert.ok(folds("catalog").every((d) => !d.open));
+  assert.match(app.text(), /Productos \(5\)/);
+  await foldAll("catalog", true);
+
+  // An order: each note, payments and history.
+  await app.go("#/pedidos");
+  await app.click('[data-act="filter"][data-v="all"]');
+  await app.click(app.byText(".stub", /A-0003/));
+  await app.wait(40);
+  const keys = folds("order").map((d) => d.getAttribute("data-fold"));
+  assert.ok(keys.filter((k) => k.startsWith("n:")).length === 2, keys.join());
+  assert.ok(keys.includes("payments") && keys.includes("history"));
+  await foldAll("order", false);
+  assert.ok(folds("order").every((d) => !d.open));
+  assert.match(folds("order")[0].querySelector("summary").textContent, /Nota 1.*\$/);
+  await foldAll("order", true);
+  assert.ok(folds("order").every((d) => d.open));
 });

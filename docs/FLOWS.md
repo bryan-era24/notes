@@ -2,6 +2,8 @@
 
 Last verified: 2026-11-15. Status: current.
 
+- **Every screen with groups** (Pedidos, Producción, Reportes, Catálogo, an order): each group folds and unfolds by tapping its title,
+  with "Expandir todo" / "Contraer todo" (decision 0011).
 - **Every screen with a list** (Pedidos, Producción, Reportes, Catálogo): the same search box under the title, × to clear, and the band
   "Solo se muestra: … · Quitar filtro" while a search is active; each screen keeps its search while the app is open.
 - **Pedidos**: a backup band when needed (reactivate the folder, choose a folder, or save today's backup); "Nuevo pedido"; one search box (name, folio number, product, phone; accents optional; × clears) that searches every

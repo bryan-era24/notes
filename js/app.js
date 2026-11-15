@@ -534,12 +534,7 @@ NT.app = (function () {
       groups[g].push(r);
     });
     var folds = ordersFold();
-    var html =
-      '<div class="row fold-tools"><button type="button" class="quiet" data-act="foldAll" data-set="orders" data-v="1">' +
-      esc(t("reports.expandAll")) +
-      '</button><button type="button" class="quiet" data-act="foldAll" data-set="orders" data-v="0">' +
-      esc(t("reports.collapseAll")) +
-      "</button></div>";
+    var html = foldTools("orders");
     ["late", "today", "tomorrow", "week", "later", "noDate", "past"].forEach(function (g) {
       if (!groups[g].length) return;
       groups[g].sort(function (a, b) {
@@ -578,17 +573,53 @@ NT.app = (function () {
 
   RESULTS.pedidos = ordersResults;
 
-  /** Which order groups are folded on this device: { "g:<group>": false } (groups start open). */
-  function ordersFold() {
-    if (!ui.ordersFold) {
-      try {
-        ui.ordersFold = JSON.parse(NT.prefs.get("ordersFold") || "null") || {};
-      } catch {
-        // catch-ok: an unreadable preference starts with every group open.
-        ui.ordersFold = {};
-      }
+  // ---------- folding (decision 0011): every group of every screen folds the same way ----------
+  // Remembered per device for list screens; an order's notes and payments only while the app is open.
+  var FOLD_PREF = { orders: "ordersFold", report: "reportOpen", production: "fold.production", catalog: "fold.catalog" };
+  var FOLD_DEFAULT = { report: { product: true, customer: true, day: true } };
+
+  function foldState(set) {
+    ui.folds = ui.folds || {};
+    if (!ui.folds[set]) {
+      var saved = null;
+      if (FOLD_PREF[set])
+        try {
+          saved = JSON.parse(NT.prefs.get(FOLD_PREF[set]) || "null");
+        } catch {
+          // catch-ok: an unreadable preference starts with the defaults.
+          saved = null;
+        }
+      ui.folds[set] = saved || Object.assign({}, FOLD_DEFAULT[set] || {});
     }
-    return ui.ordersFold;
+    return ui.folds[set];
+  }
+  /** Open unless folded; `dflt` for keys never touched (groups start open, report products start folded). */
+  function isOpen(set, key, dflt) {
+    var v = foldState(set)[key];
+    return v === undefined ? dflt !== false : !!v;
+  }
+  function saveFolds(set) {
+    if (FOLD_PREF[set]) NT.prefs.set(FOLD_PREF[set], JSON.stringify(foldState(set)));
+  }
+  function foldAttrs(set, key, open) {
+    return ' data-fold-set="' + set + '" data-fold="' + esc(key) + '"' + (open ? " open" : "");
+  }
+  /** "Expandir todo" / "Contraer todo" for one screen's groups. */
+  function foldTools(set) {
+    return (
+      '<div class="row fold-tools"><button type="button" class="quiet" data-act="foldAll" data-set="' +
+      set +
+      '" data-v="1">' +
+      esc(t("reports.expandAll")) +
+      '</button><button type="button" class="quiet" data-act="foldAll" data-set="' +
+      set +
+      '" data-v="0">' +
+      esc(t("reports.collapseAll")) +
+      "</button></div>"
+    );
+  }
+  function ordersFold() {
+    return foldState("orders");
   }
 
   // ---------- note editor (new order or a note of an order) ----------
@@ -1035,12 +1066,19 @@ NT.app = (function () {
     if (ui.panel === "editOrder") html += editOrderPanel(order);
 
     html += '</div><div class="stack sticky-not">';
-    html += '<div class="section-head"><h2>' + esc(t("order.notes")) + "</h2></div>";
+    html += '<div class="section-head"><h2>' + esc(t("order.notes")) + "</h2></div>" + foldTools("order");
     notes.forEach(function (n) {
       html += noteBlock(id, order, n);
     });
 
-    html += '<div class="section-head"><h2>' + esc(t("order.payments")) + "</h2></div>";
+    html +=
+      '<details class="foldable"' +
+      foldAttrs("order", "payments", isOpen("order", "payments", true)) +
+      '><summary class="section-head"><h2>' +
+      esc(t("order.payments")) +
+      " (" +
+      pays.length +
+      ")</h2></summary>";
     if (!pays.length) html += '<p class="hint">' + esc(t("order.noPayments")) + "</p>";
     else {
       html += '<div class="pad ruled">';
@@ -1061,6 +1099,7 @@ NT.app = (function () {
       });
       html += "</div>";
     }
+    html += "</details>";
     html += historyBlock(id, notes, pays);
     html +=
       '<div class="row"><button type="button" class="quiet" data-act="openEditOrder">' +
@@ -1106,15 +1145,17 @@ NT.app = (function () {
   function noteBlock(orderId, order, n) {
     var cancelled = n.stage === "cancelled";
     var html =
-      '<article class="pad note-block' +
+      '<details class="pad note-block foldable' +
       (cancelled ? " cancelled" : "") +
-      '"><div class="ruled"><div class="note-title"><h3 style="margin:0">' +
+      '"' +
+      foldAttrs("order", "n:" + n.id, isOpen("order", "n:" + n.id, true)) +
+      '><summary class="note-title"><h3 style="margin:0">' +
       esc(t("order.note", { n: n.number }));
     if (n.customerName && n.customerName !== order.customerName) html += " · " + esc(n.customerName);
     html += "</h3>";
     if (n.deliveryDate && n.deliveryDate !== order.deliveryDate)
       html += '<span class="hint">' + esc(t("print.delivery")) + " " + esc(fmtDate(n.deliveryDate)) + "</span>";
-    html += '</div><div><table class="lines"><tbody>';
+    html += '<strong class="money">' + money(L.noteTotal(n)) + '</strong></summary><div class="ruled"><div><table class="lines"><tbody>';
     (n.lines || []).forEach(function (l) {
       html +=
         '<tr><td class="num" style="padding-left:0;padding-right:0.75rem;text-align:left">' +
@@ -1158,7 +1199,7 @@ NT.app = (function () {
       esc(t("order.printNote")) +
       "</button>" +
       confirmButton("note:" + n.id, "deleteNote", n.id, t("common.delete")) +
-      "</div></div></article>";
+      "</div></div></details>";
     return html;
   }
 
@@ -1303,7 +1344,14 @@ NT.app = (function () {
       if (d.data.orderId === orderId && paths.indexOf(d.path) < 0) paths.push(d.path);
     });
     var list = repo.historyOf(paths);
-    var html = "<details><summary>" + esc(t("order.history")) + " (" + list.length + ")</summary>";
+    var html =
+      '<details class="foldable"' +
+      foldAttrs("order", "history", isOpen("order", "history", false)) +
+      "><summary>" +
+      esc(t("order.history")) +
+      " (" +
+      list.length +
+      ")</summary>";
     if (!list.length) return html + '<p class="hint">' + esc(t("order.historyEmpty")) + "</p></details>";
     html += '<ul class="history">';
     list.forEach(function (h) {
@@ -1410,16 +1458,22 @@ NT.app = (function () {
     var rows = L.production(snap.byId, found.notes, r);
     var html = filterBanner("produccion");
     if (!rows.length) return html + '<p class="empty">' + esc(t(found.active ? "search.nothing" : "production.empty")) + "</p>";
-    html += '<div class="pad ruled">';
+    html += foldTools("production") + '<div class="pad ruled">';
     rows.forEach(function (p) {
-      html += '<div class="make"><h2 style="margin:0">' + esc(p.productName) + "</h2><div>";
+      var key = "p:" + p.productId;
+      html +=
+        '<details class="foldable make-fold"' +
+        foldAttrs("production", key, found.active || isOpen("production", key, true)) +
+        '><summary class="make"><h2 style="margin:0">' +
+        esc(p.productName) +
+        "</h2><div>";
       if (p.grams) html += '<div class="weight">' + esc(L.formatWeight(p.grams)) + "</div>";
       html +=
         '<div class="pieces' +
         (p.grams ? "" : " weight") +
         '">' +
         esc(p.pieces === 1 ? t("common.piece") : t("common.pieces", { n: p.pieces })) +
-        "</div></div><ul>";
+        '</div></div></summary><div class="make-body"><ul>';
       p.presentations.forEach(function (x) {
         if (!x.qty) return;
         html +=
@@ -1434,7 +1488,7 @@ NT.app = (function () {
       if (p.folios.length)
         html +=
           '<p class="hint" style="grid-column:1/-1;margin:0">' + esc(t("production.orders", { list: p.folios.sort().join(", ") })) + "</p>";
-      html += "</div>";
+      html += "</div></details>";
     });
     html += '</div><p class="hint" style="margin-top:0.75rem">' + esc(t("production.weightNote")) + "</p>";
     return html;
@@ -1551,12 +1605,7 @@ NT.app = (function () {
     if (!r.notes) return html + '<p class="empty">' + esc(t(found.active ? "search.nothing" : "reports.empty")) + "</p>";
     // While searching, everything with results is shown open.
     var open = found.active ? allOpen(r) : reportOpen();
-    html +=
-      '<div class="row" style="margin-top:1.25rem"><button type="button" class="quiet" data-act="reportExpand" data-v="1">' +
-      esc(t("reports.expandAll")) +
-      '</button><button type="button" class="quiet" data-act="reportExpand" data-v="0">' +
-      esc(t("reports.collapseAll")) +
-      "</button></div>";
+    html += foldTools("report");
 
     // By product: one row per product; its presentations open under it.
     var prod = '<div class="pad ruled">';
@@ -1575,10 +1624,8 @@ NT.app = (function () {
         return;
       }
       prod +=
-        '<details class="fold" data-fold="p:' +
-        esc(p.productId) +
-        '"' +
-        (open["p:" + p.productId] ? " open" : "") +
+        '<details class="fold"' +
+        foldAttrs("report", "p:" + p.productId, !!open["p:" + p.productId]) +
         "><summary>" +
         head +
         '</summary><table class="data"><tbody>' +
@@ -1658,31 +1705,12 @@ NT.app = (function () {
 
   /** Which report sections and products are open: { product, customer, day, "p:<id>" }. Sections start open. */
   function reportOpen() {
-    if (!ui.reportOpen) {
-      var saved = null;
-      try {
-        saved = JSON.parse(NT.prefs.get("reportOpen") || "null");
-      } catch {
-        // catch-ok: an unreadable preference starts with every section open.
-        saved = null;
-      }
-      ui.reportOpen = saved || { product: true, customer: true, day: true };
-    }
-    return ui.reportOpen;
-  }
-  function saveFolds(set) {
-    if (set === "orders") NT.prefs.set("ordersFold", JSON.stringify(ui.ordersFold));
-    else saveReportOpen();
-  }
-  function saveReportOpen() {
-    NT.prefs.set("reportOpen", JSON.stringify(ui.reportOpen));
+    return foldState("report");
   }
   function reportSection(key, title, count, body, open) {
     return (
-      '<details class="report-section" data-fold="' +
-      key +
-      '"' +
-      (open[key] ? " open" : "") +
+      '<details class="report-section"' +
+      foldAttrs("report", key, !!open[key]) +
       "><summary><h2>" +
       esc(title) +
       ' <span class="hint">(' +
@@ -1737,8 +1765,16 @@ NT.app = (function () {
     });
     var html = filterBanner("catalogo");
     if (q && !list.length && !cs.length) return html + '<p class="empty">' + esc(t("search.nothing")) + "</p>";
+    html += foldTools("catalog");
     if (!q || list.length) {
-      html += '<div class="section-head"><h2>' + esc(t("catalog.products")) + " (" + list.length + ")</h2></div>";
+      html +=
+        '<details class="foldable catalog-section"' +
+        foldAttrs("catalog", "products", !!q || isOpen("catalog", "products", true)) +
+        '><summary class="section-head"><h2>' +
+        esc(t("catalog.products")) +
+        " (" +
+        list.length +
+        ")</h2></summary>";
       if (!all.length) html += '<p class="sheet">' + esc(t("catalog.empty")) + "</p>";
       else {
         html += '<ul class="stubs">';
@@ -1764,9 +1800,17 @@ NT.app = (function () {
         });
         html += "</ul>";
       }
+      html += "</details>";
     }
     if (!q || cs.length) {
-      html += '<div class="section-head"><h2>' + esc(t("catalog.customers")) + " (" + cs.length + ")</h2></div>";
+      html +=
+        '<details class="foldable catalog-section"' +
+        foldAttrs("catalog", "customers", !!q || isOpen("catalog", "customers", true)) +
+        '><summary class="section-head"><h2>' +
+        esc(t("catalog.customers")) +
+        " (" +
+        cs.length +
+        ")</h2></summary>";
       if (!cs.length) html += '<p class="hint">' + esc(t("common.none")) + "</p>";
       else {
         html += '<ul class="stubs">';
@@ -1782,6 +1826,7 @@ NT.app = (function () {
         });
         html += "</ul>";
       }
+      html += "</details>";
     }
     return html;
   }
@@ -2560,21 +2605,12 @@ NT.app = (function () {
     foldAll: function (el) {
       var on = el.getAttribute("data-v") === "1";
       var set = el.getAttribute("data-set");
-      var state = set === "orders" ? ordersFold() : reportOpen();
+      var state = foldState(set);
       view.querySelectorAll('details[data-fold-set="' + set + '"]').forEach(function (d) {
         d.open = on;
         state[d.getAttribute("data-fold")] = on;
       });
       saveFolds(set);
-    },
-    reportExpand: function (el) {
-      var on = el.getAttribute("data-v") === "1";
-      var open = reportOpen();
-      view.querySelectorAll("details[data-fold]:not([data-fold-set])").forEach(function (d) {
-        d.open = on;
-        open[d.getAttribute("data-fold")] = on;
-      });
-      saveReportOpen();
     },
     reportOnline: function () {
       ui.report.online = !ui.report.online;
@@ -3087,8 +3123,9 @@ NT.app = (function () {
       function (e) {
         var key = e.target && e.target.getAttribute && e.target.getAttribute("data-fold");
         if (!key) return;
-        var set = e.target.getAttribute("data-fold-set") || "report";
-        (set === "orders" ? ordersFold() : reportOpen())[key] = e.target.open;
+        var set = e.target.getAttribute("data-fold-set");
+        if (!set) return;
+        foldState(set)[key] = e.target.open;
         saveFolds(set);
       },
       true
