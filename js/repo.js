@@ -1,5 +1,6 @@
 /*
- * Purpose: Every change the app makes to its data: catalog, customers, orders, notes, stages, payments, settings and restores.
+ * Purpose: Every change the app makes to its data: catalog (including archiving, deleting unused and merging products), customers, orders,
+ * notes, stages, payments, settings and restores.
  * Responsibilities: Validate with NT.logic, stamp updatedAt/updatedBy, and save each change together with its history entry (only the fields that changed) (and, for a
  * new order, the device's folio counter) in one store batch, so they are saved together or not at all. Deletion is soft (deletedAt).
  * It reaches data only through the store contract and gets time, ids and the author from the env passed in; it never touches the DOM.
@@ -111,6 +112,89 @@ NT.repo = (function () {
         }),
       });
       return save(path, value);
+    }
+
+    /** How many live notes use a product (a deleted or cancelled order's notes still count: they are records). */
+    function productUse(id) {
+      return live("notes").filter(function (d) {
+        return (d.data.lines || []).some(function (l) {
+          return l.productId === id;
+        });
+      }).length;
+    }
+
+    /** Archives a product that is no longer sold (it leaves the note editor; old notes and reports keep it), or brings it back. */
+    function archiveProduct(id, archived) {
+      var path = "products/" + id;
+      var current = store.get(path);
+      if (!current) return Promise.reject(invalid(["product.missing"]));
+      return save(path, Object.assign({}, current, { active: !archived }), "update");
+    }
+
+    /** Deletes a product only when no note uses it; a used product is archived or merged instead (decision 0015). */
+    function deleteProduct(id) {
+      if (productUse(id)) return Promise.reject(invalid(["product.inUse"]));
+      return remove("products/" + id);
+    }
+
+    /**
+     * Moves every note line of product `fromId` to product `toId` and archives `fromId`, all in one batch with a history entry per
+     * changed document. Quantities, prices and amounts stay as they were sold; the line takes the target's name so production and
+     * reports count both as one. A presentation of `fromId` is matched to the target's by label (ignoring case, accents and spaces)
+     * or added to the target as it was.
+     */
+    function mergeProduct(fromId, toId) {
+      var fromPath = "products/" + fromId;
+      var toPath = "products/" + toId;
+      var from = store.get(fromPath);
+      var to = store.get(toPath);
+      if (!from || !to || fromId === toId || from.deletedAt || to.deletedAt) return Promise.reject(invalid(["product.merge"]));
+      var key = function (label) {
+        return NT.logic.normalize(String(label || "")).trim();
+      };
+      var target = Object.assign({}, to, {
+        presentations: (to.presentations || []).map(function (x) {
+          return Object.assign({}, x);
+        }),
+      });
+      var mapPres = {};
+      (from.presentations || []).forEach(function (x) {
+        var match = target.presentations.find(function (y) {
+          return key(y.label) === key(x.label);
+        });
+        if (!match) {
+          match = Object.assign({}, x, { position: target.presentations.length });
+          target.presentations.push(match);
+        }
+        mapPres[x.id] = match;
+      });
+      var ops = [];
+      function change(path, before, after, action) {
+        var stamped = stamp(after);
+        ops.push({ path: path, value: stamped }, historyOp(path, action || "update", before, stamped));
+      }
+      live("notes").forEach(function (d) {
+        var note = d.data;
+        if (
+          !(note.lines || []).some(function (l) {
+            return l.productId === fromId;
+          })
+        )
+          return;
+        var lines = note.lines.map(function (l) {
+          if (l.productId !== fromId) return l;
+          var pres = mapPres[l.presentationId];
+          return Object.assign({}, l, {
+            productId: toId,
+            productName: to.name,
+            presentationId: pres ? pres.id : l.presentationId,
+          });
+        });
+        change("notes/" + d.id, note, Object.assign({}, note, { lines: lines }), "merge");
+      });
+      if (JSON.stringify(target.presentations) !== JSON.stringify(to.presentations)) change(toPath, to, target, "merge");
+      change(fromPath, from, Object.assign({}, from, { active: false, mergedInto: toId }), "merge");
+      return store.batch(ops);
     }
 
     function saveCustomer(id, customer) {
@@ -267,6 +351,10 @@ NT.repo = (function () {
       settings: settings,
       saveSettings: saveSettings,
       saveProduct: saveProduct,
+      productUse: productUse,
+      archiveProduct: archiveProduct,
+      deleteProduct: deleteProduct,
+      mergeProduct: mergeProduct,
       saveCustomer: saveCustomer,
       createOrder: createOrder,
       updateOrder: updateOrder,

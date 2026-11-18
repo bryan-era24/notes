@@ -622,6 +622,9 @@ section + section {
 .sums .balance.zero .money {
   color: var(--done);
 }
+.sums .balance.credit .money {
+  color: var(--info);
+}
 
 .note-block .note-title {
   display: flex;
@@ -787,6 +790,46 @@ section + section {
 .choices button[aria-pressed="true"] {
   border-color: var(--select);
   background: var(--select-soft);
+}
+
+.archived-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-right: 0.75rem;
+}
+.archived-row .stub {
+  flex: 1;
+}
+
+/* Customer picker: a field that opens a list (js/app.js customerPicker). */
+.picker-label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+}
+.picker-toggle {
+  width: 100%;
+  justify-content: space-between;
+  border-color: var(--rule-strong);
+  color: var(--ink);
+  font-size: 1.2rem;
+  text-align: left;
+}
+.picker-toggle[aria-expanded="true"] {
+  border-color: var(--select);
+}
+.picker-panel {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  border: 2px solid var(--select);
+  border-radius: var(--radius);
+  background: var(--select-soft);
+  display: grid;
+  gap: 0.5rem;
+}
+.picker-panel .choices button {
+  background: var(--sheet);
 }
 
 /* ---------- production and reports ---------- */

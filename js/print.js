@@ -83,7 +83,8 @@ NT.print = (function () {
   function totalsBlock(m, t) {
     var rows = [[t("print.total"), money(m.total), "total"]];
     if (m.paid) rows.push([t("print.paid"), money(m.paid), ""]);
-    rows.push([t("print.balance"), money(Math.max(0, m.balance)), "balance"]);
+    var bl = NT.logic.balanceLine(m.balance);
+    rows.push([t(bl.kind === "credit" ? "print.credit" : "print.balance"), money(bl.amount), "balance"]);
     return (
       '<div class="totals">' +
       rows

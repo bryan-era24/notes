@@ -182,7 +182,13 @@ NT.escpos = (function () {
     if (m.paid) b.line(row(t("print.paid"), money(m.paid), cols));
     b.bold(true)
       .size(true)
-      .line(row(t("print.balance"), money(Math.max(0, m.balance)), half))
+      .line(
+        row(
+          t(NT.logic.balanceLine(m.balance).kind === "credit" ? "print.credit" : "print.balance"),
+          money(NT.logic.balanceLine(m.balance).amount),
+          half
+        )
+      )
       .size(false)
       .bold(false);
     b.align("center").line(t("pay.status." + m.status));

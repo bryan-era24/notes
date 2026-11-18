@@ -2,7 +2,8 @@
  * Purpose: The printer adapter layer: the screens hand over a print model and the chosen adapter prints it.
  * Responsibilities: Print letter pages and tickets through the browser's print dialog (works on every device), and send ESC/POS bytes
  * (js/escpos.js) to a thermal printer over Web Bluetooth, Web Serial or Web USB where the browser offers them. Adding a printer means
- * adding one transport here. It also offers sharing as text. It touches only #print-root, #page-size and browser device APIs.
+ * adding one transport here. It also offers sharing as text. It touches only #print-root, #page-size, the page title (set to the
+ * note's file name while printing, so "Save as PDF" proposes it) and browser device APIs.
  */
 window.NT = window.NT || {};
 
@@ -16,9 +17,16 @@ NT.printers = (function () {
   }
 
   // ---------- browser print (default) ----------
-  function browserPrint(kind, html, width) {
+  var currentPrint = 0;
+  var pageTitle = null; // the app's own title while a print has changed it
+  function browserPrint(kind, html, width, title) {
+    var mine = ++currentPrint;
     var root = document.getElementById("print-root");
     var page = document.getElementById("page-size");
+    var finished = false;
+    if (pageTitle === null) pageTitle = document.title;
+    // Browsers name a "Save as PDF" file after the page title: use the note's file name while printing.
+    if (title) document.title = title;
     root.innerHTML = html;
     page.textContent =
       kind === "letter"
@@ -26,9 +34,15 @@ NT.printers = (function () {
         : "@page { size: " + (width === 58 ? "58mm" : "80mm") + " auto; margin: 0; }";
     document.body.setAttribute("data-printing", kind);
     var done = function () {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("afterprint", done);
+      // A later print owns the page now: leave it alone.
+      if (mine !== currentPrint) return;
       document.body.removeAttribute("data-printing");
       root.innerHTML = "";
-      window.removeEventListener("afterprint", done);
+      document.title = pageTitle;
+      pageTitle = null;
     };
     window.addEventListener("afterprint", done);
     try {
@@ -180,14 +194,14 @@ NT.printers = (function () {
 
   /** Letter page: always through the browser (it is also how a PDF is saved). */
   function printLetter(model, t, opts) {
-    return browserPrint("letter", NT.print.letterHtml(model, t, opts));
+    return browserPrint("letter", NT.print.letterHtml(model, t, opts), null, opts && opts.title);
   }
 
   /** Ticket: through the chosen adapter. opts: { printer, width, formatDate } */
   function printTicket(model, t, opts) {
     var printer = opts.printer || "browser";
     var transport = transports[printer];
-    if (!transport || !transport.available()) return browserPrint("ticket", NT.print.ticketHtml(model, t, opts), opts.width);
+    if (!transport || !transport.available()) return browserPrint("ticket", NT.print.ticketHtml(model, t, opts), opts.width, opts.title);
     var bytes = NT.escpos.encode(model, t, { cols: opts.width === 58 ? 32 : 48, formatDate: opts.formatDate });
     return transport.send(bytes);
   }

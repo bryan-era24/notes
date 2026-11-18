@@ -51,7 +51,7 @@ see docs/DATABASE.md.
 
 ## Printing
 
-Letter and ticket printing go through the browser's print dialog, which works with any printer and also saves PDFs. A thermal
+Letter and ticket printing go through the browser's print dialog, which works with any printer. The "PDF" button makes the letter note as a PDF file named "cliente folio fecha.pdf", ready to share, save or print from the phone; on iPhone "Imprimir hoja" uses it too. A thermal
 printer can be used through the system print service (on Android, for example the RawBT app). Direct ESC/POS printing over
 Bluetooth, USB or serial is prepared (Ajustes > Impresora de tickets) for when a printer is chosen; see docs/TECHNICAL.md §5.
 

@@ -16,10 +16,13 @@ Last verified: 2026-11-15. Status: current.
   the device) and pages on its own with "Ver más";
   40 orders per group at a time. Empty first run offers the catalog and demo data.
 - **Note editor products**: best sellers first; with more than 12 products a search box filters the tiles. Catálogo has the same search.
-- **New order**: 1) customer (search, pick, type a new name, or "Sin nombre") and delivery date (Hoy, Mañana, Pasado mañana, other); 2) products: tap a product (one presentation adds it at once; several show buttons), adjust with − / + or type the quantity, adjust
+- **New order**: 1) customer: one drop-down field ("Cliente ▾") that opens a search box and a list with "Sin nombre" first, "Nuevo cliente: «…»" for a new name, then the existing customers that match (8 at a time); and delivery date (Hoy, Mañana, Pasado mañana, other); 2) products: tap a product (one presentation adds it at once; several show buttons), adjust with − / + or type the quantity, adjust
   the price per piece if needed; 3) "Guardar nota". A new name creates the customer.
-- **Order**: totals, paid, balance and payment status; stage chips; "Agregar nota", "Registrar pago" (amount, "Liquidar saldo",
-  method, optional note); print letter, print ticket, share; each note with its lines, stage, edit, print alone, delete (two taps);
+- **Order**: totals, paid, balance (or "A favor del cliente" when more was paid) and payment status; stage chips; "Agregar nota",
+  "Registrar pago" (amount, "Liquidar saldo", method, optional note; an amount above the balance shows "Cambio a entregar" and records
+  only what is owed, or "Dejar … a favor del cliente" records all, decision 0016); print letter (on iPhone, the PDF and the share
+  sheet), print ticket, "PDF" (the file "cliente folio fecha.pdf", shared or downloaded, decision 0014), share; "Cambiar cliente/fecha" opens
+  in place of its button at the end of the order, with the same customer drop-down; each note with its lines, stage, edit, print alone, delete (two taps);
   payments; history with "Volver a esta versión"; change customer/date/comment; delete the order (two taps). Changes show a toast with
   "Deshacer" for stages and deletes.
 - **Producción**: today, tomorrow, this week, next week, with ‹ › to move; per product kg and pieces, presentations, folios; the search
@@ -28,7 +31,12 @@ Last verified: 2026-11-15. Status: current.
   presentations opens to show them), by customer and by day fold and unfold, with "Expandir todo" / "Contraer todo"; what is open is
   remembered on the device; the search narrows to a product, customer or folio (sections open; money collected and pending
   hidden when a product is searched); in Connected mode "Usar todo el historial (en línea)".
-- **Catálogo**: one search for products (name, presentation) and customers (name, phone); products (name, presentations with label, optional grams, price; deactivate instead of delete) and customers.
+- **Catálogo**: one search for products (name, presentation) and customers (name, phone); products (name, presentations with label,
+  optional grams, price) and customers; a folded "Archivados" section with "Restaurar". On a saved product: "Archivar (ya no se vende)"
+  or "Restaurar"; "Eliminar producto" (two taps) only when no note uses it, otherwise "Se usa en N notas"; "Unir con otro producto":
+  choose the one that stays, confirm, and its notes move without changing amounts (decision 0015).
+- **Install**: in a Safari tab on iPhone with data only on the device, Pedidos shows "Instala la app…" with "Cómo instalar" and
+  "Ocultar". Ajustes starts with "Instalar en este equipo": steps for iPhone o iPad, Android and the computer.
 - **Ajustes**: business data; this device (folio letter, ticket width, printer, test print); database (sign in/up, setup screen,
   create or join a business, connect, status, window, back to Lite); space used; "Exportar todo para Excel (CSV en .zip)", "Exportar todo para PostgreSQL (.sql)"; backup (JSON export, import merge/replace, download and clean old);
   demo data (load, remove); diagnostics.

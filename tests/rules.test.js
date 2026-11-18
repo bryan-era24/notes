@@ -35,7 +35,7 @@ test("[TC-NFR-02-01] every text key used in code and HTML exists in Spanish", ()
     ...["pending", "partial", "paid", "credit"].map((s) => "pay.status." + s),
     ...NTL.logic.METHODS.map((m) => "pay.method." + m),
     ...["browser", "escpos-bluetooth", "escpos-serial", "escpos-usb"].map((p) => "printer." + p),
-    ...["create", "update", "delete", "restore"].map((h) => "history." + h),
+    ...["create", "update", "delete", "restore", "merge"].map((h) => "history." + h),
     ...["open", "balance", "all"].map((f) => "orders.filter." + f),
     ...["late", "today", "tomorrow", "week", "later", "noDate", "past"].map((g) => "orders.group." + g),
     ...["today", "tomorrow", "week", "nextWeek"].map((m) => "production." + m),

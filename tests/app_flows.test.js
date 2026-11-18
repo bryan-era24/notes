@@ -46,8 +46,9 @@ test("[TC-NOT-05-01] a whole note in three steps: customer, products with quanti
   assert.match(app.text(), /Palomitas de mantequilla/);
 
   await app.go("#/nuevo");
-  await app.type("#customer-search", "Fulanita");
-  await app.click('[data-act="pickNewCustomer"]');
+  await app.type("#picker-draft-q", "Fulanita");
+  await app.click('[data-act="pickerNew"]');
+  await app.click('[data-act="draftNext"]');
   // Products step: tap a product with two presentations, then one of them.
   const tile = app.byText('[data-act="openProduct"]', /mantequilla/);
   await app.click(tile);
@@ -133,7 +134,7 @@ test("[TC-NOT-05-02] a second note is added to the same order and the order tota
   const app = await openApp();
   await addProduct(app, "Palomitas", [["250 g", 250, "10"]]);
   await app.go("#/nuevo");
-  await app.click('[data-act="pickNoCustomer"]');
+  await app.click(app.byText('[data-act="pickerChoose"]', /^Sin nombre$/));
   await app.click('[data-act="draftNext"]');
   await app.click(app.byText('[data-act="openProduct"]', /Palomitas/));
   await app.click('[data-act="saveDraft"]');

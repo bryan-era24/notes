@@ -1,7 +1,7 @@
 /*
  * Purpose: Unit tests for the pure business rules in js/logic.js.
  * Covers: money parsing and formatting, line/note/order totals, payment status and balance, effective delivery dates,
- * production in kg and pieces, folios, date ranges, reports, validation and the share text.
+ * production in kg and pieces, folios, date ranges, reports, validation, the share text, and the change and credit of a payment.
  */
 "use strict";
 const test = require("node:test");
@@ -365,4 +365,18 @@ test("[TC-CAT-03-02] catalog search matches product names and presentations, and
   const c = { name: "Doña Carmen", phone: "33 1234 5678" };
   assert.ok(L.matchesSearch("dona", L.customerText(c)));
   assert.ok(L.matchesSearch("5678", L.customerText(c)));
+});
+
+test("[TC-PAG-05-01] paying more than the balance splits into what is owed and the change", () => {
+  assert.deepEqual(L.paymentSplit(50000, 8000), { apply: 8000, change: 42000 });
+  assert.deepEqual(L.paymentSplit(5000, 8000), { apply: 5000, change: 0 });
+  assert.deepEqual(L.paymentSplit(8000, 8000), { apply: 8000, change: 0 });
+  assert.deepEqual(L.paymentSplit(3000, 0), { apply: 0, change: 3000 });
+  assert.deepEqual(L.paymentSplit(3000, -1000), { apply: 0, change: 3000 });
+});
+
+test("[TC-PAG-05-02] the balance line says what is owed, or what is in favour of the customer", () => {
+  assert.deepEqual(L.balanceLine(12000), { kind: "owed", amount: 12000 });
+  assert.deepEqual(L.balanceLine(0), { kind: "owed", amount: 0 });
+  assert.deepEqual(L.balanceLine(-42000), { kind: "credit", amount: 42000 });
 });

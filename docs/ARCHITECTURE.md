@@ -12,6 +12,7 @@ js/i18n.js, js/lang/es.js   texts
 js/logic.js      PURE business rules: money, totals, payment status, production, reports, folios, validation, print model, share text
 js/print.js      PURE print model -> letter / ticket HTML
 js/escpos.js     PURE print model -> ESC/POS bytes (code page 850)
+js/pdf.js        PURE print model -> letter PDF bytes (standard Helvetica, no libraries)
 js/printers.js   printer adapters (browser print, Bluetooth, Serial, USB) and sharing
 backend/remote.js        Supabase Auth + PostgREST over fetch (only fetch user)
 backend/rows.js          PURE document <-> row mapping and window dates

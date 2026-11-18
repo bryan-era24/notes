@@ -2,7 +2,8 @@
  * Purpose: The user interface: every screen (orders, the note editor, an order, production, reports, catalog, settings), navigation and actions.
  * Responsibilities: Draw views from store data, turn taps into calls to NT.repo (the only writer), and hand printing and sharing to
  * NT.printers. It reaches data only through the store contract, computes nothing itself (NT.logic does), and writes every text through
- * NT.i18n keys. It starts the app: picks the store, fails closed on unreadable data, and registers the offline worker.
+ * NT.i18n keys. It starts the app: picks the store, fails closed on unreadable data, and registers the offline worker. It decides how a
+ * PDF reaches the person (share sheet or download) and logs which screen and button an action came from.
  */
 window.NT = window.NT || {};
 
@@ -15,7 +16,7 @@ NT.app = (function () {
   var esc = NT.print.escape;
   var L = NT.logic;
   var money = L.formatMoney;
-  var VERSION = "1.4.0";
+  var VERSION = "1.5.0";
 
   var store = null,
     backup = null,
@@ -402,8 +403,25 @@ NT.app = (function () {
     return "";
   }
 
+  /** On an iPhone in a Safari tab with data only on this device: Safari may clear a site's data after 7 days without visits. */
+  function installNotice() {
+    if (!isIOS() || isStandalone() || store.sync || NT.prefs.get("installHidden")) return "";
+    return (
+      '<div class="notice warn stack"><p><strong>' +
+      esc(t("install.noticeTitle")) +
+      "</strong> " +
+      esc(t("install.noticeText")) +
+      '</p><div class="row stretch"><a class="btn primary" href="#/ajustes">' +
+      esc(t("install.howTo")) +
+      '</a><button type="button" class="quiet" data-act="installHide">' +
+      esc(t("install.hide")) +
+      "</button></div></div>"
+    );
+  }
+
   function ordersView() {
     var html =
+      installNotice() +
       '<div id="backup-banner">' +
       backupBanner() +
       '</div><div class="stack"><a class="btn primary big" href="#/nuevo">' +
@@ -642,9 +660,10 @@ NT.app = (function () {
       lines: [],
       comment: "",
       open: null,
-      search: "",
+      picked: spec.mode === "note",
       dirty: false,
     };
+    if (ui.pickers) ui.pickers.draft = null;
     if (spec.mode === "note") {
       var order = store.get("orders/" + spec.orderId);
       if (!order) return null;
@@ -718,51 +737,15 @@ NT.app = (function () {
   }
 
   function draftCustomer(d) {
-    var q = d.search.trim().toLowerCase();
-    var list = customers().filter(function (c) {
-      return !q || String(c.name).toLowerCase().indexOf(q) >= 0;
-    });
-    var exact = list.some(function (c) {
-      return String(c.name).toLowerCase() === q;
-    });
+    var st = pickerState("draft");
+    if (!d.picked && !st.touched) st.open = true;
     var html = '<div class="stack"><h1>' + esc(t("draft.customerTitle")) + "</h1>";
-    html +=
-      '<input type="search" id="customer-search" data-input="draftSearch" value="' +
-      esc(d.search) +
-      '" placeholder="' +
-      esc(t("draft.customerSearch")) +
-      '" autocomplete="off" />';
-    html += '<div class="choices" id="customer-choices">' + customerChoices(d, list.slice(0, 8), q, exact) + "</div>";
+    html += customerPicker("draft", t("print.customer"));
     html += "<h2>" + esc(t("draft.dateTitle")) + "</h2>" + dateChoices(d.deliveryDate, "draftDate", d.mode === "note");
     html += '<button type="button" class="primary big" data-act="draftNext">' + esc(t("draft.next")) + "</button>";
     if (d.mode === "note") html += '<button type="button" class="quiet" data-act="draftBack">' + esc(t("common.back")) + "</button>";
     else html += '<a class="btn quiet" href="#/pedidos">' + esc(t("common.cancel")) + "</a>";
     return html + "</div>";
-  }
-  function customerChoices(d, list, q, exact) {
-    var html = "";
-    if (q && !exact)
-      html +=
-        '<button type="button" class="primary" data-act="pickNewCustomer">' +
-        esc(t("draft.newCustomer", { name: d.search.trim() })) +
-        "</button>";
-    list.forEach(function (c) {
-      html +=
-        '<button type="button" data-act="pickCustomer" data-id="' +
-        esc(c.id) +
-        '"' +
-        pressed(d.customerId === c.id) +
-        ">" +
-        esc(c.name) +
-        "</button>";
-    });
-    html +=
-      '<button type="button" data-act="pickNoCustomer"' +
-      pressed(!d.customerId && !d.customerName) +
-      ">" +
-      esc(t("draft.noName")) +
-      "</button>";
-    return html;
   }
 
   function draftTotal(d) {
@@ -1026,11 +1009,11 @@ NT.app = (function () {
       '</span><span class="money">' +
       money(s.paid) +
       '</span></div><div class="balance' +
-      (s.balance <= 0 ? " zero" : "") +
+      (s.balance < 0 ? " credit" : s.balance === 0 ? " zero" : "") +
       '"><span>' +
-      esc(t("order.balance")) +
+      esc(s.balance < 0 ? t("print.credit") : t("order.balance")) +
       '</span><span class="money">' +
-      money(Math.max(0, s.balance)) +
+      money(L.balanceLine(s.balance).amount) +
       "</span></div></div>";
     html +=
       '<div class="ruled"><div>' +
@@ -1061,6 +1044,10 @@ NT.app = (function () {
       esc(id) +
       '">' +
       esc(t("order.printTicket")) +
+      '</button><button type="button" data-act="pdf" data-id="' +
+      esc(id) +
+      '">' +
+      esc(t("order.pdf")) +
       '</button><button type="button" data-act="share" data-id="' +
       esc(id) +
       '">' +
@@ -1068,7 +1055,6 @@ NT.app = (function () {
       "</button></div>";
     if (ui.panel === "payment") html += paymentPanel(id, notes, s);
     if (ui.panel === "share" && ui.share) html += sharePanel(id);
-    if (ui.panel === "editOrder") html += editOrderPanel(order);
 
     html += '</div><div class="stack sticky-not">';
     html += '<div class="section-head"><h2>' + esc(t("order.notes")) + "</h2></div>" + foldTools("order");
@@ -1106,12 +1092,14 @@ NT.app = (function () {
     }
     html += "</details>";
     html += historyBlock(id, notes, pays);
-    html +=
-      '<div class="row"><button type="button" class="quiet" data-act="openEditOrder">' +
-      esc(t("order.editData")) +
-      "</button>" +
-      confirmButton("order:" + id, "deleteOrder", id, t("order.deleteOrder")) +
-      "</div>";
+    if (ui.panel === "editOrder") html += editOrderPanel(order);
+    else
+      html +=
+        '<div class="row"><button type="button" class="quiet" data-act="openEditOrder">' +
+        esc(t("order.editData")) +
+        "</button>" +
+        confirmButton("order:" + id, "deleteOrder", id, t("order.deleteOrder")) +
+        "</div>";
     html += "</div></div>";
     return html;
   }
@@ -1214,11 +1202,22 @@ NT.app = (function () {
     var live = notes.filter(function (n) {
       return n.stage !== "cancelled";
     });
-    var html = '<form class="sheet stack" data-form="payment" data-id="' + esc(orderId) + '"><h2>' + esc(t("payment.title")) + "</h2>";
+    var html =
+      '<form class="sheet stack" data-form="payment" data-id="' +
+      esc(orderId) +
+      '" data-balance="' +
+      s.balance +
+      '"><h2>' +
+      esc(t("payment.title")) +
+      "</h2>";
     html +=
       '<div class="field"><label for="pay-amount">' +
       esc(t("payment.amount")) +
-      '</label><input id="pay-amount" name="amount" type="text" inputmode="decimal" autocomplete="off" required /></div>';
+      '</label><input id="pay-amount" name="amount" type="text" inputmode="decimal" autocomplete="off" data-input="payAmount" required /></div>';
+    // Shown while typing when the money received is more than what is owed (inputs.payAmount).
+    html +=
+      '<div id="pay-over" class="notice info stack" hidden><p id="pay-change" aria-live="polite"></p>' +
+      '<button type="submit" name="mode" value="credit"></button></div>';
     if (s.balance > 0)
       html +=
         '<button type="button" class="quiet" data-act="payAll" data-v="' +
@@ -1299,23 +1298,14 @@ NT.app = (function () {
   }
 
   function editOrderPanel(order) {
-    var names = customers()
-      .map(function (c) {
-        return '<option value="' + esc(c.name) + '"></option>';
-      })
-      .join("");
     return (
-      '<form class="sheet stack" data-form="editOrder" data-id="' +
+      '<form class="sheet stack" id="edit-order" data-form="editOrder" data-id="' +
       esc(order.id || route().a) +
       '"><h2>' +
       esc(t("order.editData")) +
-      '</h2><div class="field"><label for="eo-name">' +
-      esc(t("print.customer")) +
-      '</label><input id="eo-name" name="customerName" type="text" list="eo-customers" value="' +
-      esc(order.customerName || "") +
-      '" /><datalist id="eo-customers">' +
-      names +
-      '</datalist></div><div class="field"><label for="eo-date">' +
+      "</h2>" +
+      customerPicker("edit", t("print.customer")) +
+      '<div class="field"><label for="eo-date">' +
       esc(t("print.delivery")) +
       '</label><input id="eo-date" name="deliveryDate" type="date" value="' +
       esc(order.deliveryDate || "") +
@@ -1329,6 +1319,127 @@ NT.app = (function () {
       esc(t("common.cancel")) +
       "</button></div></form>"
     );
+  }
+
+  // ---------- customer picker ----------
+  /*
+   * One drop-down for choosing the customer, used when creating an order ("draft") and when changing it ("edit"). The field shows the
+   * choice; tapping it opens a search box and a list: "Sin nombre" first, "Nuevo cliente: «…»" when the typed name is new, then the
+   * existing customers that match. Typing and choosing redraw only the picker, so the rest of the form keeps what was typed.
+   */
+  var PICKER_LIMIT = 8;
+  /** The current choice of a picker: { id, name }. */
+  function pickerChoice(key) {
+    if (key === "draft") return ui.draft ? { id: ui.draft.customerId, name: ui.draft.customerName } : { id: null, name: "" };
+    return ui.editPick || { id: null, name: "" };
+  }
+  function setPickerChoice(key, choice) {
+    if (key === "draft") {
+      ui.draft.customerId = choice.id;
+      ui.draft.customerName = choice.name;
+      ui.draft.picked = true;
+    } else ui.editPick = choice;
+  }
+  function pickerState(key) {
+    ui.pickers = ui.pickers || {};
+    return ui.pickers[key] || (ui.pickers[key] = { open: false, q: "" });
+  }
+  function customerPicker(key, label) {
+    return '<div class="field picker" id="picker-' + key + '">' + pickerInner(key, label) + "</div>";
+  }
+  function pickerInner(key, label) {
+    var st = pickerState(key);
+    var c = pickerChoice(key);
+    var html =
+      '<input type="hidden" name="customerId" value="' +
+      esc(c.id || "") +
+      '" /><input type="hidden" name="customerName" value="' +
+      esc(c.name || "") +
+      '" /><span class="picker-label" id="picker-' +
+      key +
+      '-label">' +
+      esc(label || t("print.customer")) +
+      '</span><button type="button" class="picker-toggle" data-act="pickerToggle" data-key="' +
+      key +
+      '" aria-expanded="' +
+      (st.open ? "true" : "false") +
+      '" aria-describedby="picker-' +
+      key +
+      '-label"><span>' +
+      esc(c.name || t("draft.noName")) +
+      '</span><span aria-hidden="true">' +
+      (st.open ? "▴" : "▾") +
+      "</span></button>";
+    if (st.open)
+      html +=
+        '<div class="picker-panel"><label class="visually-hidden" for="picker-' +
+        key +
+        '-q">' +
+        esc(t("draft.customerSearch")) +
+        '</label><input type="search" id="picker-' +
+        key +
+        '-q" data-input="pickerSearch" data-key="' +
+        key +
+        '" value="' +
+        esc(st.q) +
+        '" placeholder="' +
+        esc(t("draft.customerSearch")) +
+        '" autocomplete="off" /><div class="choices" id="picker-' +
+        key +
+        '-list">' +
+        pickerList(key) +
+        "</div></div>";
+    return html;
+  }
+  function pickerList(key) {
+    var st = pickerState(key);
+    var c = pickerChoice(key);
+    var q = L.normalize(st.q.trim());
+    var all = customers();
+    var list = all.filter(function (x) {
+      return !q || L.normalize(x.name).indexOf(q) >= 0;
+    });
+    var exact = all.some(function (x) {
+      return L.normalize(x.name) === q;
+    });
+    var html =
+      '<button type="button" data-act="pickerChoose" data-key="' +
+      key +
+      '" data-id=""' +
+      pressed(!c.id && !c.name) +
+      ">" +
+      esc(t("draft.noName")) +
+      "</button>";
+    if (q && !exact)
+      html +=
+        '<button type="button" data-act="pickerNew" data-key="' +
+        key +
+        '">' +
+        esc(t("draft.newCustomer", { name: st.q.trim() })) +
+        "</button>";
+    list.slice(0, PICKER_LIMIT).forEach(function (x) {
+      html +=
+        '<button type="button" data-act="pickerChoose" data-key="' +
+        key +
+        '" data-id="' +
+        esc(x.id) +
+        '"' +
+        pressed(c.id === x.id) +
+        ">" +
+        esc(x.name) +
+        "</button>";
+    });
+    if (list.length > PICKER_LIMIT) html += '<p class="hint">' + esc(t("picker.more", { n: list.length - PICKER_LIMIT })) + "</p>";
+    return html;
+  }
+  /** Redraws one picker in place and, when it is open, puts the cursor back in its search box. */
+  function redrawPicker(key) {
+    var box = document.getElementById("picker-" + key);
+    if (!box) return;
+    var label = box.querySelector(".picker-label");
+    box.innerHTML = pickerInner(key, label ? label.textContent : "");
+    var q = document.getElementById("picker-" + key + "-q");
+    if (q) q.focus({ preventScroll: true });
   }
 
   function historyBlock(orderId, notes, pays) {
@@ -1384,7 +1495,10 @@ NT.app = (function () {
         " " +
         esc(t("history.by", { by: h.by })) +
         "</span>";
-      if ((h.changes || h.before) && (h.action === "update" || h.action === "delete" || h.action === "stage" || h.action === "restore"))
+      if (
+        (h.changes || h.before) &&
+        (h.action === "update" || h.action === "delete" || h.action === "stage" || h.action === "restore" || h.action === "merge")
+      )
         html +=
           '<br /><button type="button" class="quiet" data-act="restore" data-id="' +
           esc(h.id) +
@@ -1407,8 +1521,66 @@ NT.app = (function () {
     m.localDate = order.localDate;
     return m;
   }
-  function printOpts() {
+  /** A short name of the browser for diagnostics; never the full user agent. */
+  function browserName() {
+    var ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+    if (/CriOS/.test(ua)) return "chrome-ios";
+    if (/FxiOS/.test(ua)) return "firefox-ios";
+    if (isIOS()) return "safari-ios";
+    if (/Edg\//.test(ua)) return "edge";
+    if (/Firefox\//.test(ua)) return "firefox";
+    if (/Android/.test(ua) && /Chrome\//.test(ua)) return "chrome-android";
+    if (/Chrome\//.test(ua)) return "chrome";
+    if (/Safari\//.test(ua)) return "safari";
+    return "otro";
+  }
+  /** True when the app runs installed (added to the home screen), not in a browser tab. */
+  function isStandalone() {
+    var n = typeof navigator !== "undefined" ? navigator : {};
+    if (n.standalone === true) return true;
+    try {
+      return !!(window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+    } catch {
+      // catch-ok: browsers without matchMedia run in a tab.
+      return false;
+    }
+  }
+  /** True on an iPhone or iPad, where Safari stops opening the print dialog after it was cancelled a few times. */
+  function isIOS() {
+    var n = typeof navigator !== "undefined" ? navigator : {};
+    return /iPad|iPhone|iPod/.test(n.userAgent || "") || (n.platform === "MacIntel" && n.maxTouchPoints > 1);
+  }
+  /** Whether this browser can hand a file to the system share sheet (iPhone, Android). */
+  function canShareFile(file) {
+    try {
+      return typeof navigator !== "undefined" && !!navigator.canShare && navigator.canShare({ files: [file] });
+    } catch {
+      // catch-ok: browsers without File or canShare simply cannot share files.
+      return false;
+    }
+  }
+  /**
+   * The letter note as a PDF file named "cliente folio fecha.pdf": on phones it opens the share sheet (Imprimir, Guardar en Archivos,
+   * WhatsApp...); elsewhere it is downloaded.
+   */
+  function deliverPdf(orderId, scope, noteNumber) {
+    var m = modelFor(orderId, scope, noteNumber);
+    var name = L.pdfFileName(m, t("draft.noName"));
+    var bytes = NT.pdf.letter(m, t, { formatDate: printOpts().formatDate, title: name.replace(/\.pdf$/, "") });
+    var file = typeof File === "function" ? new File([bytes], name, { type: "application/pdf" }) : null;
+    NT.log.info("pdf.made", { pages: m.notes.length, bytes: bytes.length, share: !!(file && canShareFile(file)) });
+    if (file && canShareFile(file))
+      return navigator.share({ files: [file], title: name }).catch(function (e) {
+        if (e && e.name === "AbortError") return; // the person closed the share sheet
+        NT.log.warn("pdf.share_failed", { error: e });
+        download(name, bytes, "application/pdf");
+      });
+    download(name, bytes, "application/pdf");
+    return Promise.resolve();
+  }
+  function printOpts(m) {
     return {
+      title: m ? L.pdfFileName(m, t("draft.noName")).replace(/\.pdf$/, "") : "",
       formatDate: function (d) {
         return fmtDate(d, "print");
       },
@@ -1772,6 +1944,12 @@ NT.app = (function () {
     });
     var html = filterBanner("catalogo");
     if (q && !list.length && !cs.length) return html + '<p class="empty">' + esc(t("search.nothing")) + "</p>";
+    var archived = list.filter(function (p) {
+      return p.active === false;
+    });
+    list = list.filter(function (p) {
+      return p.active !== false;
+    });
     html += foldTools("catalog");
     if (!q || list.length) {
       html +=
@@ -1808,6 +1986,35 @@ NT.app = (function () {
         html += "</ul>";
       }
       html += "</details>";
+    }
+    if (archived.length) {
+      // Products no longer sold: out of the way, folded, each with "Restaurar" (decision 0015).
+      html +=
+        '<details class="foldable catalog-section"' +
+        foldAttrs("catalog", "archived", !!q || isOpen("catalog", "archived", false)) +
+        '><summary class="section-head"><h2>' +
+        esc(t("catalog.archived")) +
+        " (" +
+        archived.length +
+        ')</h2></summary><p class="hint">' +
+        esc(t("catalog.archivedHelp")) +
+        '</p><ul class="stubs">';
+      archived.forEach(function (p) {
+        var into = p.mergedInto && store.get("products/" + p.mergedInto);
+        html +=
+          '<li class="archived-row"><a class="stub" style="grid-template-columns:1fr" href="#/producto/' +
+          encodeURIComponent(p.id) +
+          '"><span class="who inactive">' +
+          esc(p.name) +
+          "</span>" +
+          (into ? '<span class="meta" style="grid-column:1">' + esc(t("catalog.mergedInto", { name: into.name })) + "</span>" : "") +
+          '</a><button type="button" class="quiet" data-act="restoreProduct" data-id="' +
+          esc(p.id) +
+          '">' +
+          esc(t("product.restore")) +
+          "</button></li>";
+      });
+      html += "</ul></details>";
     }
     if (!q || cs.length) {
       html +=
@@ -1860,7 +2067,7 @@ NT.app = (function () {
           : [{ id: null, label: "", grams: "", price: "", active: true }],
       };
     }
-    var html = '<form class="stack" data-form="product"><h1>' + esc(t("product.title")) + "</h1>";
+    var html = '<form class="stack" id="product-form" data-form="product"><h1>' + esc(t("product.title")) + "</h1>";
     html +=
       '<div class="field"><label for="pf-name">' +
       esc(t("product.name")) +
@@ -1925,20 +2132,92 @@ NT.app = (function () {
       '<button type="button" style="margin-top:0.75rem" data-act="addPresentation">' +
       esc(t("product.addPresentation")) +
       "</button></div>";
-    if (id)
-      html +=
-        '<div class="chips"><button type="button" data-act="toggleProduct"' +
-        pressed(f.active) +
-        ">" +
-        esc(t("product.active")) +
-        "</button></div>";
     html +=
       '<div class="row stretch"><button type="submit" class="primary big">' +
       esc(t("common.save")) +
       '</button><a class="btn quiet" href="#/catalogo">' +
       esc(t("common.cancel")) +
       "</a></div></form>";
+    if (id && store.get("products/" + id)) html += productActions(id);
     return html;
+  }
+
+  /** Below a saved product: archive or restore, delete (only when no note uses it) and merge into another product (decision 0015). */
+  function productActions(id) {
+    var p = store.get("products/" + id);
+    var used = repo.productUse(id);
+    var html = '<section class="sheet stack"><h2>' + esc(t("product.manage")) + "</h2>";
+    if (p.active === false)
+      html +=
+        '<p class="hint">' +
+        esc(t("product.archivedHelp")) +
+        '</p><button type="button" class="primary" data-act="restoreProduct" data-id="' +
+        esc(id) +
+        '">' +
+        esc(t("product.restore")) +
+        "</button>";
+    else
+      html +=
+        '<p class="hint">' +
+        esc(t("product.archiveHelp")) +
+        '</p><button type="button" data-act="archiveProduct" data-id="' +
+        esc(id) +
+        '">' +
+        esc(t("product.archive")) +
+        "</button>";
+    if (used) html += '<p class="hint">' + esc(used === 1 ? t("product.inUseOne") : t("product.inUse", { n: used })) + "</p>";
+    else html += confirmButton("product", "deleteProduct", id, t("product.delete"));
+    // Merge: choose the product that stays, then confirm.
+    var others = products().filter(function (x) {
+      return x.id !== id;
+    });
+    if (others.length) {
+      if (!ui.merge || ui.merge.from !== id)
+        html +=
+          '<p class="hint">' +
+          esc(t("product.mergeHelp")) +
+          '</p><button type="button" class="quiet" data-act="mergeStart" data-id="' +
+          esc(id) +
+          '">' +
+          esc(t("product.merge")) +
+          "</button>";
+      else if (!ui.merge.to)
+        html +=
+          "<h3>" +
+          esc(t("product.mergeChoose", { name: p.name })) +
+          '</h3><div class="choices">' +
+          others
+            .map(function (x) {
+              return (
+                '<button type="button" data-act="mergePick" data-id="' +
+                esc(x.id) +
+                '">' +
+                esc(x.name) +
+                (x.active === false ? " · " + esc(t("catalog.inactive")) : "") +
+                "</button>"
+              );
+            })
+            .join("") +
+          '</div><button type="button" class="quiet" data-act="mergeCancel">' +
+          esc(t("common.cancel")) +
+          "</button>";
+      else {
+        var to = store.get("products/" + ui.merge.to) || {};
+        html +=
+          '<div class="notice warn stack"><p>' +
+          esc(
+            used === 1
+              ? t("product.mergeConfirmOne", { from: p.name, to: to.name })
+              : t("product.mergeConfirm", { n: used, from: p.name, to: to.name })
+          ) +
+          '</p><div class="row"><button type="button" class="primary" data-act="mergeConfirm">' +
+          esc(t("product.mergeDo")) +
+          '</button><button type="button" class="quiet" data-act="mergeCancel">' +
+          esc(t("common.cancel")) +
+          "</button></div></div>";
+      }
+    }
+    return html + "</section>";
   }
 
   function customerView(id) {
@@ -1977,9 +2256,46 @@ NT.app = (function () {
   }
 
   // ---------- settings ----------
+  /** Steps to install the app on each kind of device (Ajustes). */
+  function installSection() {
+    var here = isStandalone() ? t("install.here.installed") : t("install.here.tab");
+    var devices = [
+      ["iphone", t("install.iphone")],
+      ["android", t("install.android")],
+      ["pc", t("install.pc")],
+    ];
+    return (
+      '<section class="sheet stack" id="instalar"><h2>' +
+      esc(t("install.title")) +
+      '</h2><p class="hint">' +
+      esc(here) +
+      "</p>" +
+      devices
+        .map(function (d) {
+          return (
+            '<details class="foldable"' +
+            foldAttrs("settings", "install-" + d[0], false) +
+            "><summary><h3>" +
+            esc(d[1]) +
+            "</h3></summary><ol>" +
+            t("install.steps." + d[0])
+              .split("|")
+              .map(function (step) {
+                return "<li>" + esc(step) + "</li>";
+              })
+              .join("") +
+            "</ol></details>"
+          );
+        })
+        .join("") +
+      "</section>"
+    );
+  }
+
   function settingsView() {
     var s = repo.settings();
     var html =
+      installSection() +
       '<form class="sheet stack" data-form="business"><h2>' +
       esc(t("settings.business")) +
       '</h2><p class="hint">' +
@@ -2402,32 +2718,41 @@ NT.app = (function () {
         render();
       }, failToast);
     },
-    pickCustomer: withDraft(function (d, el) {
-      var c = store.get("customers/" + el.getAttribute("data-id"));
-      d.customerId = el.getAttribute("data-id");
-      d.customerName = c ? c.name : "";
-      d.search = d.customerName;
-      render();
-    }),
-    pickNewCustomer: withDraft(function (d) {
-      d.customerId = null;
-      d.customerName = d.search.trim();
-      d.step = "products";
-      render();
-    }),
-    pickNoCustomer: withDraft(function (d) {
-      d.customerId = null;
-      d.customerName = "";
-      d.search = "";
-      render();
-    }),
+    pickerToggle: function (el) {
+      var key = el.getAttribute("data-key");
+      var st = pickerState(key);
+      st.open = !st.open;
+      st.touched = true;
+      if (st.open) st.q = "";
+      redrawPicker(key);
+    },
+    pickerChoose: function (el) {
+      var key = el.getAttribute("data-key");
+      var id = el.getAttribute("data-id");
+      var c = id ? store.get("customers/" + id) : null;
+      setPickerChoice(key, c ? { id: id, name: c.name } : { id: null, name: "" });
+      var st = pickerState(key);
+      st.open = false;
+      st.touched = true;
+      redrawPicker(key);
+    },
+    pickerNew: function (el) {
+      var key = el.getAttribute("data-key");
+      var st = pickerState(key);
+      setPickerChoice(key, { id: null, name: st.q.trim() });
+      st.open = false;
+      st.touched = true;
+      redrawPicker(key);
+    },
     draftDate: withDraft(function (d, el) {
       d.deliveryDate = el.getAttribute("data-v") || null;
       render();
     }),
     draftNext: withDraft(function (d) {
-      // Typed a name but did not pick: use it as a new customer.
-      if (!d.customerId && !d.customerName && d.search.trim()) d.customerName = d.search.trim();
+      // Typed a name in the picker but did not choose: use it as a new customer.
+      var st = pickerState("draft");
+      if (!d.customerId && !d.customerName && st.open && st.q.trim()) d.customerName = st.q.trim();
+      st.open = false;
       d.step = "products";
       render();
       view.focus();
@@ -2438,7 +2763,7 @@ NT.app = (function () {
     }),
     draftToCustomer: withDraft(function (d) {
       d.step = "customer";
-      d.search = d.customerName;
+      pickerState("draft").open = false;
       render();
     }),
     openProduct: withDraft(function (d, el) {
@@ -2505,8 +2830,19 @@ NT.app = (function () {
       if (input) input.focus();
     },
     openEditOrder: function () {
+      var order = store.get("orders/" + route().a) || {};
       ui.panel = "editOrder";
+      ui.editPick = { id: order.customerId || null, name: order.customerName || "" };
+      ui.pickers = ui.pickers || {};
+      ui.pickers.edit = { open: false, q: "" };
       render();
+      // The form opens where the button was, at the end of the order: bring it into view and put the focus in it.
+      var form = document.getElementById("edit-order");
+      if (form) {
+        if (form.scrollIntoView) form.scrollIntoView({ block: "start" });
+        var first = form.querySelector(".picker-toggle");
+        if (first) first.focus({ preventScroll: true });
+      }
     },
     closePanel: function () {
       ui.panel = null;
@@ -2514,7 +2850,9 @@ NT.app = (function () {
       render();
     },
     payAll: function (el) {
-      document.getElementById("pay-amount").value = L.moneyInput(+el.getAttribute("data-v"));
+      var input = document.getElementById("pay-amount");
+      input.value = L.moneyInput(+el.getAttribute("data-v"));
+      inputs.payAmount(input);
     },
     payMethod: function (el) {
       choose(el, "method");
@@ -2560,13 +2898,24 @@ NT.app = (function () {
       }, failToast);
     },
     printLetter: function (el) {
-      NT.printers.printLetter(modelFor(el.getAttribute("data-id"), "order"), t, printOpts()).catch(printFailed);
+      var id = el.getAttribute("data-id");
+      if (isIOS()) return deliverPdf(id, "order").catch(printFailed);
+      var m = modelFor(id, "order");
+      NT.printers.printLetter(m, t, printOpts(m)).catch(printFailed);
     },
     printTicket: function (el) {
-      NT.printers.printTicket(modelFor(el.getAttribute("data-id"), "order"), t, printOpts()).catch(printFailed);
+      var m = modelFor(el.getAttribute("data-id"), "order");
+      NT.printers.printTicket(m, t, printOpts(m)).catch(printFailed);
     },
     printNote: function (el) {
-      NT.printers.printLetter(modelFor(el.getAttribute("data-id"), "note", +el.getAttribute("data-n")), t, printOpts()).catch(printFailed);
+      var id = el.getAttribute("data-id");
+      var n = +el.getAttribute("data-n");
+      if (isIOS()) return deliverPdf(id, "note", n).catch(printFailed);
+      var m = modelFor(id, "note", n);
+      NT.printers.printLetter(m, t, printOpts(m)).catch(printFailed);
+    },
+    pdf: function (el) {
+      deliverPdf(el.getAttribute("data-id"), "order").catch(printFailed);
     },
     share: function (el) {
       var id = el.getAttribute("data-id");
@@ -2579,6 +2928,7 @@ NT.app = (function () {
         total: t("print.total"),
         paid: t("print.paid"),
         balance: t("print.balance"),
+        credit: t("print.credit"),
         status: t("pay.status." + m.status),
         formatDate: function (d) {
           return fmtDate(d, "long");
@@ -2639,9 +2989,56 @@ NT.app = (function () {
       x.active = !x.active;
       render();
     },
-    toggleProduct: function () {
-      ui.productForm.active = !ui.productForm.active;
+    installHide: function () {
+      NT.prefs.set("installHidden", "1");
       render();
+    },
+    archiveProduct: function (el) {
+      var id = el.getAttribute("data-id");
+      repo.archiveProduct(id, true).then(function () {
+        ui.productForm = null;
+        toast(t("product.archived"), lastHistoryId("products/" + id));
+        render();
+      }, failToast);
+    },
+    restoreProduct: function (el) {
+      var id = el.getAttribute("data-id");
+      repo.archiveProduct(id, false).then(function () {
+        ui.productForm = null;
+        toast(t("product.restored"), lastHistoryId("products/" + id));
+        render();
+      }, failToast);
+    },
+    deleteProduct: function (el) {
+      var path = "products/" + el.getAttribute("data-id");
+      ui.confirm = null;
+      repo.deleteProduct(el.getAttribute("data-id")).then(function () {
+        ui.productForm = null;
+        toast(t("common.deleted"), lastHistoryId(path));
+        go("#/catalogo");
+      }, failToast);
+    },
+    mergeStart: function (el) {
+      ui.merge = { from: el.getAttribute("data-id"), to: null };
+      render();
+    },
+    mergePick: function (el) {
+      if (ui.merge) ui.merge.to = el.getAttribute("data-id");
+      render();
+    },
+    mergeCancel: function () {
+      ui.merge = null;
+      render();
+    },
+    mergeConfirm: function () {
+      var m = ui.merge;
+      if (!m || !m.to) return;
+      repo.mergeProduct(m.from, m.to).then(function () {
+        ui.merge = null;
+        ui.productForm = null;
+        toast(t("product.merged"));
+        go("#/producto/" + encodeURIComponent(m.to));
+      }, failToast);
     },
     ticketWidth: function (el) {
       NT.prefs.set("ticketWidth", el.getAttribute("data-v"));
@@ -2826,7 +3223,12 @@ NT.app = (function () {
     }, failToast);
   }
   function failToast(e) {
-    NT.log.error("ui.action_failed", { error: e });
+    NT.log.error("ui.action_failed", {
+      action: ui.lastAct || null,
+      screen: route().name,
+      problems: (e && e.problems) || null,
+      error: e,
+    });
     toast(problemText(e));
   }
   function afterBackup(st) {
@@ -2885,26 +3287,32 @@ NT.app = (function () {
       var filters = document.getElementById("order-filters");
       if (filters) filters.hidden = !!el.value.trim();
     },
-    draftSearch: function (el) {
-      var d = ui.draft;
-      d.search = el.value;
-      if (d.customerName && d.search !== d.customerName) {
-        d.customerId = null;
-        d.customerName = "";
+    payAmount: function (el) {
+      var form = el.closest("form");
+      var over = document.getElementById("pay-over");
+      if (!form || !over) return;
+      var balance = +form.getAttribute("data-balance");
+      var received = L.parseMoney(el.value);
+      var split = received === null || balance <= 0 ? { apply: 0, change: 0 } : L.paymentSplit(received, balance);
+      over.hidden = !(split.change > 0);
+      if (split.change > 0) {
+        document.getElementById("pay-change").textContent = t("payment.change", { amount: money(split.change), owed: money(split.apply) });
+        over.querySelector("button").textContent = t("payment.leaveCredit", { amount: money(split.change) });
       }
-      var q = d.search.trim().toLowerCase();
-      var list = customers().filter(function (c) {
-        return !q || String(c.name).toLowerCase().indexOf(q) >= 0;
-      });
-      var exact = list.some(function (c) {
-        return String(c.name).toLowerCase() === q;
-      });
-      document.getElementById("customer-choices").innerHTML = customerChoices(d, list.slice(0, 8), q, exact);
+    },
+    pickerSearch: function (el) {
+      var key = el.getAttribute("data-key");
+      pickerState(key).q = el.value;
+      var list = document.getElementById("picker-" + key + "-list");
+      if (list) list.innerHTML = pickerList(key);
     },
     draftDate: function (el) {
-      if (!el.value) return;
+      if (!el.value || !ui.draft) return;
+      // No redraw: on an iPhone the calendar is still open when the value changes, and redrawing the field would close it.
       ui.draft.deliveryDate = el.value;
-      render();
+      view.querySelectorAll('[data-act="draftDate"]').forEach(function (b) {
+        b.setAttribute("aria-pressed", b.getAttribute("data-v") === el.value ? "true" : "false");
+      });
     },
     productSearch: function (el) {
       ui.draft.productSearch = el.value;
@@ -2932,15 +3340,31 @@ NT.app = (function () {
     },
     reportFrom: function (el) {
       ui.report.from = el.value;
-      render();
+      renderAfterDate(el);
     },
     reportTo: function (el) {
       ui.report.to = el.value;
-      render();
+      renderAfterDate(el);
     },
   };
+  /** Redraws once the date field is left: on an iPhone its calendar is still open when the value changes. */
+  function renderAfterDate(el) {
+    if (document.activeElement !== el) return render();
+    el.addEventListener("blur", render, { once: true });
+  }
   var CHANGE_ONLY = { draftDate: 1, reportFrom: 1, reportTo: 1 };
 
+  /**
+   * Copies what the product form's fields show into ui.productForm. iPhone keyboard suggestions and autocorrect can change a field
+   * without an input event, so the fields, not the copy kept while typing, are the truth before any redraw and when saving.
+   */
+  function syncProductForm() {
+    var form = document.getElementById("product-form");
+    if (!form || !ui.productForm) return;
+    form.querySelectorAll("[data-bind]").forEach(function (el) {
+      bindValue(el.getAttribute("data-bind"), el.value);
+    });
+  }
   function bindValue(path, value) {
     var parts = path.split(".");
     var obj = ui.productForm;
@@ -2949,29 +3373,39 @@ NT.app = (function () {
   }
 
   var forms = {
-    payment: function (form, data) {
-      var amount = L.parseMoney(data.get("amount"));
+    payment: function (form, data, submitter) {
+      var received = L.parseMoney(data.get("amount"));
+      var amount = received === null ? 0 : received;
+      var comment = String(data.get("comment") || "");
+      var balance = +form.getAttribute("data-balance");
+      var leaveCredit = submitter && submitter.value === "credit";
+      var split = balance > 0 ? L.paymentSplit(amount, balance) : { apply: amount, change: 0 };
+      var change = 0;
+      // More than what is owed: record what is owed and say how much change to give back, unless they chose to leave it in favour.
+      if (split.change > 0 && !leaveCredit) {
+        change = split.change;
+        amount = split.apply;
+        comment = t("payment.changeNote", { received: money(received), change: money(change) }) + (comment ? " · " + comment : "");
+      }
       repo
         .addPayment({
           orderId: form.getAttribute("data-id"),
-          amount: amount === null ? 0 : amount,
+          amount: amount,
           method: data.get("method") || "cash",
           noteId: data.get("noteId") || null,
-          comment: data.get("comment") || "",
+          comment: comment,
         })
         .then(function () {
           ui.panel = null;
-          toast(t("payment.saved"));
+          toast(change ? t("payment.savedChange", { amount: money(change) }) : t("payment.saved"));
           render();
         }, failToast);
     },
     editOrder: function (form, data) {
-      var name = String(data.get("customerName") || "").trim();
-      var match = customers().find(function (c) {
-        return c.name.toLowerCase() === name.toLowerCase();
-      });
       var id = route().a;
-      var ready = match || !name ? Promise.resolve(match ? match.id : null) : repo.saveCustomer(null, { name: name });
+      var pickedId = String(data.get("customerId") || "") || null;
+      var name = String(data.get("customerName") || "").trim();
+      var ready = pickedId || !name ? Promise.resolve(pickedId) : repo.saveCustomer(null, { name: name });
       ready
         .then(function (cid) {
           return repo.updateOrder(id, {
@@ -2983,11 +3417,13 @@ NT.app = (function () {
         })
         .then(function () {
           ui.panel = null;
+          ui.editPick = null;
           toast(t("common.saved"));
           render();
         }, failToast);
     },
     product: function () {
+      syncProductForm();
       var f = ui.productForm;
       var product = {
         name: f.name,
@@ -3100,6 +3536,9 @@ NT.app = (function () {
       var fn = actions[el.getAttribute("data-act")];
       if (fn) {
         e.preventDefault();
+        ui.lastAct = el.getAttribute("data-act");
+        NT.log.debug("ui.tap", { action: ui.lastAct, screen: route().name });
+        syncProductForm();
         fn(el);
       }
     });
@@ -3116,12 +3555,16 @@ NT.app = (function () {
     view.addEventListener("change", function (e) {
       var name = e.target.getAttribute("data-input");
       if (name && CHANGE_ONLY[name]) inputs[name](e.target);
+      var bind = e.target.getAttribute("data-bind");
+      if (bind && ui.productForm) bindValue(bind, e.target.value);
     });
     view.addEventListener("submit", function (e) {
       var form = e.target.closest("[data-form]");
       if (!form) return;
       e.preventDefault();
       var fn = forms[form.getAttribute("data-form")];
+      ui.lastAct = form.getAttribute("data-form");
+      NT.log.debug("ui.submit", { action: ui.lastAct, screen: route().name });
       if (fn) fn(form, new FormData(form), e.submitter);
     });
     // <details> toggles do not bubble: listen in the capture phase to remember what is open.
@@ -3176,6 +3619,7 @@ NT.app = (function () {
       var r = route();
       if (r.name !== "nuevo" && r.name !== "nota") ui.draft = null;
       if (r.name !== "producto") ui.productForm = null;
+      ui.merge = null;
       ui.shown = PAGE_SIZE;
       render();
       view.focus({ preventScroll: true });
@@ -3348,6 +3792,15 @@ NT.app = (function () {
       NT.log.error("ui.unhandled_rejection", { error: e.reason });
     });
     NT.i18n.init();
+    NT.log.setHeader(function () {
+      return [
+        "Notas " + VERSION,
+        "navegador: " + browserName(),
+        isStandalone() ? "instalada" : "pestaña",
+        store ? (store.sync ? "Conectado" : "Lite") + " (" + (store.engine || "?") + ")" : "sin datos aún",
+      ].join(" · ");
+    });
+    NT.log.info("app.start", { version: VERSION, browser: browserName(), installed: isStandalone() });
     NT.createStore().then(function (opened) {
       store = opened;
       if (!store) {

@@ -1,5 +1,5 @@
 /*
- * Purpose: Every business rule of the app as pure functions: money, totals, balances, payment status, production, reports, folios, dates, validation, print model and share text.
+ * Purpose: Every business rule of the app as pure functions: money, totals, balances, payment status, change and credit, production, reports, folios, dates, validation, print model, share text and the PDF file name.
  * Responsibilities: Compute from plain documents passed in. It must not touch the DOM, storage, network, clock or randomness (callers pass "today" and ids in), so every rule is tested in tests/logic.test.js.
  *
  * Money is integer centavos. Weights are integer grams. Dates are "YYYY-MM-DD" strings; times are ISO strings.
@@ -87,6 +87,33 @@ NT.logic = (function () {
     if (paid === total) return "paid";
     return paid > 0 ? "partial" : "pending";
   }
+  /**
+   * Splits money received against what is still owed: `apply` is recorded as the payment and `change` goes back to the customer
+   * (or is left in their favour, if they ask). Both in centavos.
+   */
+  function paymentSplit(received, balance) {
+    var apply = Math.max(0, Math.min(received, balance));
+    return { apply: apply, change: received - apply };
+  }
+  /** What the balance means for people: { kind: "owed", amount } or, when more was paid than the total, { kind: "credit", amount }. */
+  function balanceLine(balance) {
+    return balance < 0 ? { kind: "credit", amount: -balance } : { kind: "owed", amount: balance };
+  }
+
+  /**
+   * The name of a note's PDF: customer, folio and delivery date ("Fiestas Ejemplo A-0005 2026-11-20.pdf"). `noName` names an order
+   * without a customer; without a date the date is left out. Characters that file systems refuse are removed.
+   */
+  function pdfFileName(m, noName) {
+    var parts = [m.customerName || noName || "", m.folio || "", m.deliveryDate || ""];
+    var name = parts
+      .join(" ")
+      .replace(/[\\/:*?"<>|]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return (name || "nota") + ".pdf";
+  }
+
   function orderSummary(notes, payments) {
     var total = orderTotal(notes);
     var paid = paidTotal(payments);
@@ -585,7 +612,7 @@ NT.logic = (function () {
 
   /**
    * Plain text of a print model, for WhatsApp or any share target.
-   * labels: { folio, customer, delivery, note, total, paid, balance, status, formatDate?(date) }
+   * labels: { folio, customer, delivery, note, total, paid, balance, credit, status, formatDate?(date) }
    */
   function shareText(m, labels) {
     var fmt = labels.formatDate || String;
@@ -606,7 +633,8 @@ NT.logic = (function () {
     out.push("");
     out.push(labels.total + ": " + formatMoney(m.total));
     if (m.paid) out.push(labels.paid + ": " + formatMoney(m.paid));
-    out.push(labels.balance + ": " + formatMoney(Math.max(0, m.balance)));
+    var bl = balanceLine(m.balance);
+    out.push((bl.kind === "credit" ? labels.credit || labels.balance : labels.balance) + ": " + formatMoney(bl.amount));
     out.push(labels.status);
     if (m.business.footer) {
       out.push("");
@@ -629,6 +657,9 @@ NT.logic = (function () {
     paidTotal: paidTotal,
     paymentStatus: paymentStatus,
     orderSummary: orderSummary,
+    paymentSplit: paymentSplit,
+    pdfFileName: pdfFileName,
+    balanceLine: balanceLine,
     isDate: isDate,
     addDays: addDays,
     weekRange: weekRange,

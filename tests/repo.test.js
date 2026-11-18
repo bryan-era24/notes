@@ -1,7 +1,7 @@
 /*
  * Purpose: Tests for js/repo.js, the only place that changes data.
  * Covers: history written in the same batch as each change, folios per device, note numbering, frozen prices, informative stages,
- * payments and balances, soft delete, restore from history, and validation refusals that save nothing.
+ * payments and balances, soft delete, restore from history, validation refusals that save nothing, and deleting or merging products.
  */
 "use strict";
 const test = require("node:test");
@@ -180,4 +180,70 @@ test("[TC-SYN-03-03] settings are kept and merged", async () => {
   await repo.saveSettings({ phone: "33" });
   assert.equal(repo.settings().name, "Palomitas Lupita");
   assert.equal(repo.settings().phone, "33");
+});
+
+/** Two products that are really the same, and an order with a note that uses the duplicate. */
+async function duplicates(repo, store) {
+  const good = await repo.saveProduct(null, { name: "Palomitas Naturales", presentations: [{ label: "Bolsa", price: 2500 }] });
+  const dup = await repo.saveProduct(null, {
+    name: "Palomitas Natural",
+    presentations: [
+      { label: "bolsa ", price: 2400 },
+      { label: "Charola", price: 9000 },
+    ],
+  });
+  const p = store.get("products/" + dup);
+  const o = await repo.createOrder({ customerName: "Ana" });
+  const lines = p.presentations.map((x, i) => NT_line(p, dup, x, i + 2));
+  const n = await repo.saveNote(null, { orderId: o, lines });
+  return { good, dup, o, n };
+}
+function NT_line(p, pid, x, qty) {
+  return { productId: pid, presentationId: x.id, productName: p.name, presentationLabel: x.label, qty, unitPrice: x.price };
+}
+
+test("[TC-CAT-06-01] a product never used in a note can be deleted; one already used is refused", async () => {
+  const { store, repo } = setup();
+  const unused = await repo.saveProduct(null, product);
+  await repo.deleteProduct(unused);
+  assert.ok(store.get("products/" + unused).deletedAt, "soft deleted");
+  const { dup } = await duplicates(repo, store);
+  await assert.rejects(repo.deleteProduct(dup), (e) => e.problems && e.problems.includes("product.inUse"));
+  assert.ok(!store.get("products/" + dup).deletedAt);
+  assert.equal(repo.productUse(dup), 1);
+});
+
+test("[TC-CAT-06-02] merging a duplicate moves its notes to the right product without changing amounts, and archives it", async () => {
+  const { store, repo, batches } = setup();
+  const { good, dup, n } = await duplicates(repo, store);
+  const before = store.get("notes/" + n);
+  batches.length = 0;
+  await repo.mergeProduct(dup, good);
+  assert.equal(batches.length, 1, "one batch: saved together or not at all");
+  const note = store.get("notes/" + n);
+  const target = store.get("products/" + good);
+  assert.deepEqual(
+    note.lines.map((l) => [l.productId, l.productName, l.presentationLabel, l.qty, l.unitPrice]),
+    before.lines.map((l) => [good, "Palomitas Naturales", l.presentationLabel, l.qty, l.unitPrice])
+  );
+  // "bolsa " matches the target's "Bolsa"; "Charola" did not exist there and is added.
+  assert.equal(note.lines[0].presentationId, target.presentations[0].id);
+  assert.deepEqual(
+    target.presentations.map((x) => x.label),
+    ["Bolsa", "Charola"]
+  );
+  assert.equal(note.lines[1].presentationId, target.presentations[1].id);
+  assert.equal(store.get("products/" + dup).active, false, "the duplicate is archived");
+  const hist = batches[0].filter((c) => c.path.startsWith("history/")).length;
+  assert.equal(hist, 3, "history for the note and both products");
+  assert.equal(repo.productUse(dup), 0);
+  assert.equal(repo.productUse(good), 1);
+});
+
+test("[TC-CAT-06-03] a product cannot be merged into itself or into one that does not exist", async () => {
+  const { store, repo } = setup();
+  const { good, dup } = await duplicates(repo, store);
+  await assert.rejects(repo.mergeProduct(dup, dup));
+  await assert.rejects(repo.mergeProduct(dup, "nope"));
+  assert.equal(store.get("products/" + good).presentations.length, 1);
 });
