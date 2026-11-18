@@ -101,6 +101,34 @@ NT.logic = (function () {
   }
 
   /**
+   * Whether someone else changed a document within the last `minutes` (to warn before editing it on this device): { who, minutes }
+   * or null. `me` is this device's author name; `now` an ISO time passed in.
+   */
+  function recentChange(doc, me, now, minutes) {
+    if (!doc || !doc.updatedBy || !doc.updatedAt || doc.updatedBy === me) return null;
+    var ago = (Date.parse(now) - Date.parse(doc.updatedAt)) / 60000;
+    if (!(ago >= -1 && ago <= minutes)) return null;
+    return { who: doc.updatedBy, minutes: Math.max(0, Math.floor(ago)) };
+  }
+
+  /** The fields whose values differ between two versions of a document (for showing a sync conflict), sorted. */
+  function versionDiff(a, b) {
+    a = a || {};
+    b = b || {};
+    var keys = {};
+    Object.keys(a)
+      .concat(Object.keys(b))
+      .forEach(function (k) {
+        keys[k] = 1;
+      });
+    return Object.keys(keys)
+      .filter(function (k) {
+        return JSON.stringify(a[k] === undefined ? null : a[k]) !== JSON.stringify(b[k] === undefined ? null : b[k]);
+      })
+      .sort();
+  }
+
+  /**
    * The name of a note's PDF: customer, folio and delivery date ("Fiestas Ejemplo A-0005 2026-11-20.pdf"). `noName` names an order
    * without a customer; without a date the date is left out. Characters that file systems refuse are removed.
    */
@@ -659,6 +687,8 @@ NT.logic = (function () {
     orderSummary: orderSummary,
     paymentSplit: paymentSplit,
     pdfFileName: pdfFileName,
+    versionDiff: versionDiff,
+    recentChange: recentChange,
     balanceLine: balanceLine,
     isDate: isDate,
     addDays: addDays,

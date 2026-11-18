@@ -3,12 +3,15 @@
 -- membership, and the functions that create or join a business. It must stay idempotent (safe to run any number of times) and never
 -- delete rows: the app deletes by setting deleted_at.
 --
--- Schema version 2 (version 2 added the readable v_* views at the end). Requires what Supabase provides: auth.uid() and the "authenticated" role (tests/helpers/postgres.js creates stand-ins).
+-- Schema version 3 (version 2 added the readable v_* views at the end; version 3 added version numbers: the rev column and
+-- notas_push, decision 0017). Requires what Supabase provides: auth.uid() and the "authenticated" role (tests/helpers/postgres.js creates stand-ins).
 -- Every device document is one row of public.documents, stored as it is in data (jsonb):
 --   path               "orders/<uuid>", "notes/<uuid>", "products/<uuid>", ...
 --   doc_date           the date used by the device's cache window (null = always kept)
---   client_updated_at  when the person made the change, on their device; the newer change wins
+--   client_updated_at  when the person made the change, on their device (kept for reading; versions decide, not clocks)
 --   server_updated_at  when the row reached the server; devices pull changes after this point
+--   rev                the row's version, 1 when created and one more on every change; a device sends the version it edited
+--                      (notas_push) and a change made on an older version is returned as a conflict, never applied nor dropped
 
 create table if not exists public.businesses (
   id uuid primary key default gen_random_uuid(),
@@ -37,6 +40,8 @@ create table if not exists public.documents (
   primary key (business_id, path)
 );
 
+alter table public.documents add column if not exists rev bigint not null default 1;
+
 create index if not exists documents_by_change on public.documents (business_id, server_updated_at);
 create index if not exists documents_by_date on public.documents (business_id, collection, doc_date);
 
@@ -46,19 +51,23 @@ language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.members m where m.business_id = b and m.user_id = auth.uid())
 $$;
 
--- Last write wins: an update carrying an older client_updated_at than the stored row is skipped, so a change queued offline
--- cannot overwrite a newer one from another device. History entries are never changed once written.
+-- Every change raises rev. Changes sent through notas_push were already checked against the version the device edited; a plain
+-- update from an app older than schema version 3 keeps the old rule (an older client_updated_at is skipped). History entries are
+-- never changed once written.
 create or replace function public.notas_touch() returns trigger
 language plpgsql as $$
 begin
   new.collection := split_part(new.path, '/', 1);
   if tg_op = 'UPDATE' then
-    if new.client_updated_at < old.client_updated_at then
-      return null;
-    end if;
     if old.collection = 'history' then
       return null;
     end if;
+    if coalesce(current_setting('notas.versioned', true), '') <> 'on' and new.client_updated_at < old.client_updated_at then
+      return null;
+    end if;
+    new.rev := old.rev + 1;
+  else
+    new.rev := 1;
   end if;
   new.server_updated_at := clock_timestamp();
   return new;
@@ -158,8 +167,58 @@ begin
 end
 $$;
 
+-- Sends a device's changes (schema version 3, decision 0017). Each row carries base_rev, the version the device edited (null when it
+-- has none yet). A new path is inserted; an identical document or a history entry is accepted as it is; a change on the current
+-- version is applied; anything else is a conflict: the row is left untouched and returned so the device can show both versions.
+-- Security invoker: the access rules above still apply to every row.
+create or replace function public.notas_push(p_business uuid, p_rows jsonb)
+returns table (path text, status text, rev bigint, data jsonb, deleted_at timestamptz, client_updated_at timestamptz)
+language plpgsql security invoker set search_path = public as $$
+#variable_conflict use_column
+declare
+  r jsonb;
+  cur public.documents;
+  base bigint;
+  sent_at timestamptz;
+begin
+  if not public.notas_is_member(p_business) then
+    raise exception 'not_a_member';
+  end if;
+  perform set_config('notas.versioned', 'on', true);
+  for r in select value from jsonb_array_elements(p_rows) loop
+    base := nullif(r->>'base_rev', '')::bigint;
+    sent_at := (r->>'client_updated_at')::timestamptz;
+    select * into cur from public.documents d where d.business_id = p_business and d.path = r->>'path' for update;
+    if not found then
+      begin
+        insert into public.documents (business_id, path, collection, doc_date, data, deleted_at, client_updated_at)
+        values (p_business, r->>'path', '', (r->>'doc_date')::date, r->'data', (r->>'deleted_at')::timestamptz, sent_at)
+        returning * into cur;
+        return query select cur.path, 'ok'::text, cur.rev, null::jsonb, null::timestamptz, null::timestamptz;
+      exception when unique_violation then
+        -- Another device created the same path a moment ago.
+        select * into cur from public.documents d where d.business_id = p_business and d.path = r->>'path';
+        return query select cur.path, 'conflict'::text, cur.rev, cur.data, cur.deleted_at, cur.client_updated_at;
+      end;
+    elsif cur.collection = 'history' or cur.data = r->'data' then
+      return query select cur.path, 'ok'::text, cur.rev, null::jsonb, null::timestamptz, null::timestamptz;
+    elsif base = cur.rev or (base is null and sent_at >= cur.client_updated_at) then
+      update public.documents d
+        set doc_date = (r->>'doc_date')::date, data = r->'data', deleted_at = (r->>'deleted_at')::timestamptz, client_updated_at = sent_at
+        where d.business_id = p_business and d.path = r->>'path'
+        returning * into cur;
+      return query select cur.path, 'ok'::text, cur.rev, null::jsonb, null::timestamptz, null::timestamptz;
+    else
+      return query select cur.path, 'conflict'::text, cur.rev, cur.data, cur.deleted_at, cur.client_updated_at;
+    end if;
+  end loop;
+end
+$$;
+
 revoke all on function public.notas_bootstrap(text), public.notas_join(text), public.notas_membership(), public.notas_new_code() from public, anon;
+revoke all on function public.notas_push(uuid, jsonb) from public, anon;
 grant execute on function public.notas_bootstrap(text), public.notas_join(text), public.notas_membership() to authenticated;
+grant execute on function public.notas_push(uuid, jsonb) to authenticated;
 grant execute on function public.notas_is_member(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------------------------------------------------------------

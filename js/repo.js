@@ -123,6 +123,18 @@ NT.repo = (function () {
       }).length;
     }
 
+    /**
+     * Saves a version of a document that the person chose (after a sync conflict, decision 0017) as a normal change: stamped, with
+     * its history entry, and sent on top of the version everybody else has.
+     */
+    function useVersion(path, data) {
+      if (!store.get(path) || !data) return Promise.reject(invalid(["version.missing"]));
+      var copy = Object.assign({}, data);
+      delete copy.updatedAt;
+      delete copy.updatedBy;
+      return save(path, copy, "update");
+    }
+
     /** Archives a product that is no longer sold (it leaves the note editor; old notes and reports keep it), or brings it back. */
     function archiveProduct(id, archived) {
       var path = "products/" + id;
@@ -352,6 +364,7 @@ NT.repo = (function () {
       saveSettings: saveSettings,
       saveProduct: saveProduct,
       productUse: productUse,
+      useVersion: useVersion,
       archiveProduct: archiveProduct,
       deleteProduct: deleteProduct,
       mergeProduct: mergeProduct,

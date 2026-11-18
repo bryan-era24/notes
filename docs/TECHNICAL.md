@@ -39,12 +39,20 @@ and `sync` in Connected mode. Backups: `{ app: "notas", schemaVersion: 1, export
 
 ## 4. Sync (Connected mode)
 
-Device first; every change marks its path pending in the same write. One sync: first-connection setup (upload, download or ask),
-push in chunks of 100 (a refused chunk is retried one by one and refused documents are flagged), pull rows changed since the cursor
-whose `doc_date` is null or inside the window, then drop non-pending documents whose window date is before `today − windowDays`.
+Device first; every change marks its path pending in the same write, with the version (`rev`) the change was made on. One sync:
+first-connection setup (upload, download or ask), push in chunks of 100 through `notas_push` (a refused chunk is retried one by one
+and refused documents are flagged), pull rows changed since the cursor whose `doc_date` is null or inside the window, then drop
+non-pending documents whose window date is before `today − windowDays`.
+
+Versions (decision 0017): the server applies a change only when it was made on the row's current version. Otherwise the answer is a
+conflict with the server's row: the device shows that version, keeps its own in `_sync/state.conflicts` and the page shows both
+("Otra persona cambió lo mismo que tú"); "Usar la mía" calls `NT.repo.useVersion` (a normal change with history) and then
+`resolveConflict`; "Quedarme con la otra" only calls `resolveConflict`, after a second tap. A pulled row replaces any document that
+is not pending, whatever the clocks say. Opening an order changed by someone else in the last 15 minutes shows a notice
+(`NT.logic.recentChange`). The status line says "N cambios por revisar" while conflicts wait.
 Orders, their notes and payments share one window date (the later of made and delivery). Runs 1.5 s after a change, every 90 s while the app is open and visible (decision 0012), on open, on
 `online`, when visible, and from "Sincronizar ahora"; retries from 15 s doubling to 5 min. States: idle, syncing, offline,
-signed-out, needs-business, needs-schema, needs-choice, error. Full-history reports read a period with `fetchRange` without storing it.
+signed-out, needs-business, needs-schema (also a database still on schema version 2), needs-choice, error. Full-history reports read a period with `fetchRange` without storing it.
 
 ## 5. Printing
 

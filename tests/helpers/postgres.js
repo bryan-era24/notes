@@ -1,6 +1,7 @@
 /*
  * Purpose: A real PostgreSQL (PGlite, in memory) with db/schema.sql applied, for tests that must run offline.
- * Responsibilities: Create the Supabase pieces the schema expects (auth.uid() and the authenticated and anon roles), apply the schema, and run SQL as a given user inside a transaction so row-level security applies. It never connects to a network database.
+ * Responsibilities: Create the Supabase pieces the schema expects (auth.uid() and the authenticated and anon roles), apply the schema (the
+ * current one, or an older copy given by the test), and run SQL as a given user inside a transaction so row-level security applies. It never connects to a network database.
  */
 "use strict";
 const fs = require("node:fs");
@@ -21,12 +22,12 @@ const SUPABASE_STANDINS = `
   $$;
 `;
 
-/** Opens a fresh database with the schema applied. */
-async function openDatabase() {
+/** Opens a fresh database with the schema applied (or another schema text, such as an old version, to test updates). */
+async function openDatabase(schema = SCHEMA) {
   const { PGlite } = await import("@electric-sql/pglite");
   const db = new PGlite();
   await db.exec(SUPABASE_STANDINS);
-  await db.exec(SCHEMA);
+  await db.exec(schema);
   let queue = Promise.resolve();
 
   /** Runs `fn(tx)` as `userId` (role authenticated), or as the owner when userId is null. Serialised. */
