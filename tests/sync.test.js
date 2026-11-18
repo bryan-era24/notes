@@ -2,7 +2,9 @@
  * Purpose: Prove that Connected mode never loses or duplicates a change and converges between devices, against the real schema.
  * Covers: sign-up, creating and joining a business, the first upload, a second device downloading, changes queued offline, last write wins,
  * pending documents never overwritten nor dropped, the cache window, a database not set up yet, the first-connection choice with a copy kept,
- * refused changes flagged, sending the same change twice, full-history reads, and nothing personal in the diagnostics.
+ * refused changes flagged, sending the same change twice, full-history reads, nothing personal in the diagnostics, and version numbers:
+ * a change made on the latest version is kept whatever the clocks say, simultaneous changes to one document are kept aside and reported,
+ * separate documents never conflict, and a database on schema version 2 asks to be updated.
  */
 "use strict";
 const test = require("node:test");
@@ -381,4 +383,91 @@ test("[TC-SYN-09-01] while the app is open and visible, it checks for other devi
   timers.length = 0;
   await engine.api.syncNow();
   assert.deepEqual(due(), []);
+});
+
+test("[TC-SYN-10-01] a change made after seeing another device's version is kept, even if this phone's clock is behind", async () => {
+  const server = await createFakeSupabase();
+  const a = await owner(server);
+  const sa = a.sync();
+  const c = await a.repo.saveCustomer(null, { name: "Ana" });
+  await sa.syncNow();
+  const b = await member(server, a.membership.join_code);
+  const sb = b.sync();
+  await sb.syncNow();
+  b.clock.t += 3600 * 1000; // B's clock is an hour ahead of A's
+  await b.repo.saveCustomer(c, { name: "Ana (B)" });
+  await sb.syncNow();
+  await sa.syncNow();
+  assert.equal(a.store.get("customers/" + c).name, "Ana (B)", "A sees B's change");
+  await a.repo.saveCustomer(c, { name: "Ana (A)" }); // made later, on top of B's version, but A's clock says earlier
+  const st = await sa.syncNow();
+  assert.equal(st.pending, 0);
+  await sb.syncNow();
+  const rows = await server.rows("documents", a.NT.connection.session().userId);
+  assert.equal(rows.find((r) => r.path === "customers/" + c).data.name, "Ana (A)", "the server keeps A's change");
+  assert.equal(b.store.get("customers/" + c).name, "Ana (A)", "and B gets it");
+});
+
+test("[TC-SYN-10-02] two people change the same thing at once: nobody's change is lost and the second one is told", async () => {
+  const server = await createFakeSupabase();
+  const a = await owner(server);
+  const sa = a.sync();
+  const c = await a.repo.saveCustomer(null, { name: "Ana" });
+  await sa.syncNow();
+  const b = await member(server, a.membership.join_code);
+  const sb = b.sync();
+  await sb.syncNow();
+  // Both edit version 1 before seeing each other's change.
+  await a.repo.saveCustomer(c, { name: "Ana (A)" });
+  await b.repo.saveCustomer(c, { name: "Ana (B)" });
+  await sb.syncNow(); // B arrives first
+  const st = await sa.syncNow();
+  assert.equal(st.pending, 0, "nothing stays stuck");
+  assert.equal(st.conflicts, 1, "A is told");
+  const conflict = sa.conflicts()[0];
+  assert.equal(conflict.path, "customers/" + c);
+  assert.equal(conflict.mine.name, "Ana (A)", "A's version is kept aside");
+  assert.equal(conflict.theirs.name, "Ana (B)");
+  assert.equal(a.store.get("customers/" + c).name, "Ana (B)", "A shows what everybody else sees");
+  const rows = await server.rows("documents", a.NT.connection.session().userId);
+  assert.equal(rows.find((r) => r.path === "customers/" + c).data.name, "Ana (B)");
+  // A decides to keep its own: it becomes a normal change on top of B's version and reaches everybody.
+  await a.repo.useVersion("customers/" + c, conflict.mine);
+  await sa.resolveConflict("customers/" + c);
+  const after = await sa.syncNow();
+  assert.equal(after.conflicts, 0);
+  await sb.syncNow();
+  assert.equal(b.store.get("customers/" + c).name, "Ana (A)");
+});
+
+test("[TC-SYN-10-03] payments and notes added to the same order at once by different devices are all kept", async () => {
+  const server = await createFakeSupabase();
+  const a = await owner(server);
+  const sa = a.sync();
+  const o = await a.repo.createOrder({ customerName: "Ana" });
+  await sa.syncNow();
+  const b = await member(server, a.membership.join_code);
+  const sb = b.sync();
+  await sb.syncNow();
+  await a.repo.addPayment({ orderId: o, amount: 1000, method: "cash" });
+  await b.repo.addPayment({ orderId: o, amount: 2000, method: "cash" });
+  await a.repo.saveNote(null, { orderId: o, lines: [line] });
+  await b.repo.saveNote(null, { orderId: o, lines: [line] });
+  await sa.syncNow();
+  const st = await sb.syncNow();
+  await sa.syncNow();
+  assert.equal(st.conflicts, 0);
+  for (const d of [a, b]) {
+    assert.equal(d.store.list("payments").length, 2);
+    assert.equal(d.store.list("notes").length, 2);
+  }
+});
+
+test("[TC-SYN-10-04] a database still on schema version 2 asks for the update instead of syncing the old way", async () => {
+  const server = await createFakeSupabase({ withoutPush: true });
+  const a = await owner(server);
+  await a.repo.saveCustomer(null, { name: "Ana" });
+  const st = await a.sync().syncNow();
+  assert.equal(st.state, "needs-schema");
+  assert.ok(st.pending > 0, "changes wait on the device");
 });

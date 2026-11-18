@@ -1,6 +1,6 @@
 {
   "name": "notas",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Order notes for a small point of sale: products with presentations, orders with notes, payments, production and reports. Offline first, optional Supabase sync.",
   "private": true,
   "engines": {

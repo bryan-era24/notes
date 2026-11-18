@@ -1,6 +1,6 @@
 /*
  * Purpose: A stand-in for a Supabase project (Auth plus PostgREST) backed by a real in-memory PostgreSQL, so sync tests run offline against the real schema.
- * Responsibilities: Answer the HTTP calls backend/remote.js makes (sign-up, sign-in, refresh, logout, GET/POST/PATCH on the tables, and rpc calls) by running SQL as the signed-in user, so row-level security and the last-write-wins trigger really apply. Tests can take it offline, expire tokens, pretend the schema was never run and read every request. It only answers its own base URL.
+ * Responsibilities: Answer the HTTP calls backend/remote.js makes (sign-up, sign-in, refresh, logout, GET/POST/PATCH on the tables, and rpc calls) by running SQL as the signed-in user, so row-level security, the version trigger and notas_push really apply. Tests can take it offline, expire tokens, pretend the schema was never run (or is still version 2, without notas_push) and read every request. It only answers its own base URL.
  */
 "use strict";
 const { openDatabase } = require("./postgres");
@@ -8,7 +8,7 @@ const { openDatabase } = require("./postgres");
 const BASE = "https://notas-test.supabase.local";
 const ANON_KEY = "test-anon-key";
 const TABLES = new Set(["documents", "businesses", "members"]);
-const FUNCTIONS = new Set(["notas_bootstrap", "notas_join", "notas_membership"]);
+const FUNCTIONS = new Set(["notas_bootstrap", "notas_join", "notas_membership", "notas_push"]);
 const COLUMN = /^[a-z_]+$/;
 const OPS = { eq: "=", gt: ">", gte: ">=", lt: "<", lte: "<=" };
 
@@ -41,7 +41,7 @@ function parseList(text) {
   return out;
 }
 
-async function createFakeSupabase() {
+async function createFakeSupabase(options = {}) {
   const pg = await openDatabase();
   const users = new Map(); // email -> { id, password }
   const tokens = new Map(); // access token -> user id
@@ -204,7 +204,8 @@ async function createFakeSupabase() {
     const userId = tokens.get(token);
     if (!userId) return respond(401, { code: "PGRST301", message: "JWT expired" });
     if (rpc) {
-      if (server.schemaMissing || !FUNCTIONS.has(rpc[1])) return respond(404, { code: "PGRST202", message: "Could not find the function" });
+      if (server.schemaMissing || !FUNCTIONS.has(rpc[1]) || (options.withoutPush && rpc[1] === "notas_push"))
+        return respond(404, { code: "PGRST202", message: "Could not find the function" });
       const names = Object.keys(body || {});
       names.forEach((n) => {
         if (!COLUMN.test(n)) throw new Error("bad argument " + n);
@@ -214,7 +215,7 @@ async function createFakeSupabase() {
         const result = await pg.as(userId, (tx) =>
           tx.query(
             `select * from public.${rpc[1]}(${args})`,
-            names.map((n) => body[n])
+            names.map((n) => (body[n] !== null && typeof body[n] === "object" ? JSON.stringify(body[n]) : body[n]))
           )
         );
         return respond(200, serialise(result));

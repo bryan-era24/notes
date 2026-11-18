@@ -1,6 +1,7 @@
 /*
  * Purpose: Prove db/schema.sql on a real PostgreSQL (PGlite in memory).
- * Covers: idempotency, creating and joining a business, isolation between businesses, last write wins, history that cannot change, and no deletes.
+ * Covers: idempotency, creating and joining a business, isolation between businesses, last write wins for apps before schema version 3,
+ * history that cannot change, no deletes, updating a version 2 database, and notas_push (versions, conflicts, history, strangers).
  */
 "use strict";
 const test = require("node:test");
@@ -79,4 +80,52 @@ test("[TC-SYN-05-04] the copy of the SQL shown in the app matches db/schema.sql"
   const { loadModules } = require("./helpers/load_modules");
   const NT = loadModules(["backend/schema_sql.js"]);
   assert.equal(NT.schemaSql, require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "db", "schema.sql"), "utf8"));
+});
+
+const fs = require("node:fs");
+const path = require("node:path");
+const SCHEMA_V2 = fs.readFileSync(path.join(__dirname, "fixtures", "schema_v2.sql"), "utf8");
+
+async function push(pg, user, business, rows) {
+  const r = await pg.as(user, (tx) => tx.query("select * from public.notas_push($1, $2)", [business, JSON.stringify(rows)]));
+  return r.rows;
+}
+const row = (path, data, base, at = "2026-11-17T18:00:00Z") => ({ path, data, base_rev: base, client_updated_at: at, doc_date: null });
+
+test("[TC-SYN-10-07] a database on schema version 2 is updated by running the current schema: rows kept, versions start at 1", async () => {
+  const pg = await openDatabase(SCHEMA_V2);
+  const [own] = (await pg.as(ANA, (tx) => tx.query("select * from public.notas_bootstrap('Palomitas')"))).rows;
+  await upsert(pg, ANA, own.business_id, "customers/c1", { name: "Ana" }, "2026-11-17T10:00:00Z");
+  await pg.db.exec(pg.schema);
+  const [before] = (await pg.as(ANA, (tx) => tx.query("select data, rev from public.documents where path = 'customers/c1'"))).rows;
+  assert.deepEqual(before.data, { name: "Ana" });
+  assert.equal(Number(before.rev), 1);
+  const [ok] = await push(pg, ANA, own.business_id, [row("customers/c1", { name: "Ana B" }, 1)]);
+  assert.equal(ok.status, "ok");
+  assert.equal(Number(ok.rev), 2);
+});
+
+test("[TC-SYN-10-08] notas_push: new rows, identical rows, changes on the current version, conflicts, history and strangers", async () => {
+  const pg = await openDatabase();
+  const [own] = (await pg.as(ANA, (tx) => tx.query("select * from public.notas_bootstrap('Palomitas')"))).rows;
+  const b = own.business_id;
+  let [r] = await push(pg, ANA, b, [row("customers/c1", { name: "Ana" }, null)]);
+  assert.deepEqual([r.status, Number(r.rev)], ["ok", 1]);
+  [r] = await push(pg, ANA, b, [row("customers/c1", { name: "Ana" }, null)]);
+  assert.deepEqual([r.status, Number(r.rev)], ["ok", 1], "sending the same document again changes nothing");
+  [r] = await push(pg, ANA, b, [row("customers/c1", { name: "Ana 2" }, 1)]);
+  assert.deepEqual([r.status, Number(r.rev)], ["ok", 2]);
+  // Another device still on version 1, even with a later clock: a conflict, and the row is untouched.
+  [r] = await push(pg, ANA, b, [row("customers/c1", { name: "Ana 3" }, 1, "2030-01-01T00:00:00Z")]);
+  assert.equal(r.status, "conflict");
+  assert.equal(Number(r.rev), 2);
+  assert.deepEqual(r.data, { name: "Ana 2" });
+  // History entries never change once written.
+  await push(pg, ANA, b, [row("history/h1", { action: "create" }, null)]);
+  [r] = await push(pg, ANA, b, [row("history/h1", { action: "tampered" }, 1)]);
+  assert.equal(r.status, "ok");
+  const [h] = (await pg.as(ANA, (tx) => tx.query("select data from public.documents where path = 'history/h1'"))).rows;
+  assert.deepEqual(h.data, { action: "create" });
+  // Someone who is not a member cannot send rows to the business.
+  await assert.rejects(push(pg, EVE, b, [row("customers/x", { name: "Eve" }, null)]), /not_a_member/);
 });

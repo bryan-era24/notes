@@ -35,6 +35,10 @@ Last verified: 2026-11-15. Status: current.
   optional grams, price) and customers; a folded "Archivados" section with "Restaurar". On a saved product: "Archivar (ya no se vende)"
   or "Restaurar"; "Eliminar producto" (two taps) only when no note uses it, otherwise "Se usa en N notas"; "Unir con otro producto":
   choose the one that stays, confirm, and its notes move without changing amounts (decision 0015).
+- **Two people, same thing** (Connected, decision 0017): if someone changed a note, an order, a product or a customer first, every
+  screen shows "Otra persona cambió lo mismo que tú" with a table of what differs ("Tu versión" / "La que se quedó"). "Usar la mía"
+  saves yours on top; "Quedarme con la otra" discards yours after a second tap. The status line says "1 cambio por revisar".
+  Opening an order that someone else changed in the last 15 minutes shows who and how long ago.
 - **Install**: in a Safari tab on iPhone with data only on the device, Pedidos shows "Instala la app…" with "Cómo instalar" and
   "Ocultar". Ajustes starts with "Instalar en este equipo": steps for iPhone o iPad, Android and the computer.
 - **Ajustes**: business data; this device (folio letter, ticket width, printer, test print); database (sign in/up, setup screen,

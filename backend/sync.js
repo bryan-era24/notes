@@ -3,7 +3,9 @@
  * Responsibilities: Record every local change as pending in the same write, send pending changes when the server can be reached, pull
  * other devices' changes inside the cache window, drop documents outside the window only once they are safely on the server, detect a
  * database that is not set up yet, and report its state. It never deletes a pending change, never overwrites a pending document with
- * server data, and keeps a copy of the device's data before replacing it (decisions 0002 and 0003).
+ * server data, and keeps a copy of the device's data before replacing it (decisions 0002 and 0003). It remembers the version (rev) of
+ * every document it has seen and sends it with each change; a change the server refuses because someone changed the same document
+ * first is kept aside as a conflict for the person to decide, never dropped (decision 0017).
  */
 window.NT = window.NT || {};
 
@@ -20,7 +22,16 @@ NT.sync = (function () {
   var MISSING = ["PGRST205", "PGRST202", "42P01", "42883"];
 
   function emptyState() {
-    return { outbox: {}, cursor: null, setup: "pending", lastSyncAt: null, lastError: null, windowKey: null };
+    return {
+      outbox: {},
+      cursor: null,
+      setup: "pending",
+      lastSyncAt: null,
+      lastError: null,
+      windowKey: null,
+      revs: {}, // path -> the server version this device last saw
+      conflicts: {}, // path -> { at, mine, theirs }: a change the server refused because the document had changed meanwhile
+    };
   }
   function isMissingSchema(e) {
     return (
@@ -72,6 +83,7 @@ NT.sync = (function () {
         failed: entries.filter(function (e) {
           return e.failed;
         }).length,
+        conflicts: Object.keys(s.conflicts || {}).length,
         lastSyncAt: s.lastSyncAt,
         lastError: s.lastError,
       };
@@ -97,7 +109,10 @@ NT.sync = (function () {
       var any = false;
       changes.forEach(function (c) {
         if (c.op !== "upsert") return; // removing from this device only (window, cleanup) is not a deletion
-        s.outbox[c.path] = { at: at };
+        // The version this change was made on: the one seen before the first pending change of this document.
+        var before = s.outbox[c.path];
+        var base = before ? before.base : s.revs && s.revs[c.path] !== undefined ? s.revs[c.path] : null;
+        s.outbox[c.path] = { at: at, base: base === undefined ? null : base };
         any = true;
       });
       if (!any) return;
@@ -125,7 +140,7 @@ NT.sync = (function () {
     function markAllPending(s) {
       var at = now().toISOString();
       core.paths().forEach(function (path) {
-        s.outbox[path] = { at: at };
+        s.outbox[path] = { at: at, base: s.revs && s.revs[path] !== undefined ? s.revs[path] : null };
       });
     }
     function windowFrom() {
@@ -156,18 +171,39 @@ NT.sync = (function () {
     }
 
     // ---------- push ----------
-    function settle(entries, failedPaths) {
+    /**
+     * Clears sent entries from the outbox. results: path -> { status: "ok" | "conflict", rev, row } from notas_push. An accepted
+     * change records its new version; a conflict keeps this device's version aside, shows the server's, and stops being pending.
+     */
+    function settle(entries, failedPaths, results) {
       var after = state();
+      var docs = {};
+      results = results || {};
       entries.forEach(function (pair) {
         var path = pair[0],
           entry = pair[1];
         var current = after.outbox[path];
+        var result = results[path];
+        if (result && result.status === "conflict") {
+          var theirs = NT.rows.fromRow(result.row)[1];
+          after.conflicts[path] = { at: now().toISOString(), mine: core.get(path), theirs: theirs };
+          after.revs[path] = result.rev;
+          docs[path] = theirs;
+          delete after.outbox[path];
+          NT.log.warn("sync.conflict", { collection: NT.rows.collectionOf(path) });
+          return;
+        }
+        if (result && result.rev !== undefined) {
+          after.revs[path] = result.rev;
+          // A newer local change made while this one was in flight was made on top of the version just accepted.
+          if (current && current.at !== entry.at) current.base = result.rev;
+        }
         // A newer local change made while this one was in flight stays pending.
         if (!current || current.at !== entry.at) return;
         if (failedPaths && failedPaths[path]) after.outbox[path] = Object.assign({}, entry, { failed: true });
         else delete after.outbox[path];
       });
-      return saveState(after);
+      return saveState(after, docs);
     }
 
     function sendChunk(entries, bid) {
@@ -176,7 +212,17 @@ NT.sync = (function () {
       entries.forEach(function (pair) {
         var doc = core.get(pair[0]);
         if (!doc) gone.push(pair);
-        else rows.push(NT.rows.toRow(pair[0], doc, bid, pair[1].at, core.get));
+        else {
+          var row = NT.rows.toRow(pair[0], doc, bid, pair[1].at, core.get);
+          rows.push({
+            path: row.path,
+            doc_date: row.doc_date,
+            data: row.data,
+            deleted_at: row.deleted_at,
+            client_updated_at: row.client_updated_at,
+            base_rev: pair[1].base === undefined ? null : pair[1].base,
+          });
+        }
       });
       var live = entries.filter(function (pair) {
         return gone.indexOf(pair) < 0;
@@ -188,11 +234,15 @@ NT.sync = (function () {
         });
       return cleared
         .then(function () {
-          return remote.upsert("documents", rows, NT.rows.KEY);
+          return remote.rpc("notas_push", { p_business: bid, p_rows: rows });
         })
         .then(
-          function () {
-            return settle(live).then(function () {
+          function (answer) {
+            var results = {};
+            (answer || []).forEach(function (r) {
+              results[r.path] = { status: r.status, rev: Number(r.rev), row: r };
+            });
+            return settle(live, null, results).then(function () {
               return live.length;
             });
           },
@@ -259,6 +309,7 @@ NT.sync = (function () {
       if (s.windowKey !== key) s.cursor = null; // the window changed: read it again in full
       s.windowKey = key;
       var docs = {},
+        revs = {},
         counts = { pulled: 0, evicted: 0 };
       var pending = function (path) {
         return !!state().outbox[path];
@@ -274,9 +325,9 @@ NT.sync = (function () {
             rows = rows || [];
             rows.forEach(function (row) {
               var pair = NT.rows.fromRow(row);
+              // A pending document keeps this device's change: notas_push will tell whether it was made on the latest version.
               if (pending(pair[0])) return;
-              var local = core.get(pair[0]);
-              if (local && NT.rows.isNewer(local.updatedAt, row.client_updated_at)) return;
+              if (row.rev !== undefined && row.rev !== null) revs[pair[0]] = Number(row.rev);
               docs[pair[0]] = pair[1];
               counts.pulled++;
             });
@@ -301,6 +352,13 @@ NT.sync = (function () {
           }
         });
         var latest = state();
+        Object.keys(revs).forEach(function (p) {
+          if (!latest.outbox[p]) latest.revs[p] = revs[p];
+        });
+        // A document dropped from this device needs no version: it is read again in full if it comes back.
+        Object.keys(docs).forEach(function (p) {
+          if (docs[p] === null) delete latest.revs[p];
+        });
         latest.cursor = cursor;
         latest.windowKey = s.windowKey;
         latest.lastSyncAt = now().toISOString();
@@ -484,6 +542,26 @@ NT.sync = (function () {
         fetchAll: fetchAll,
         onStatus: function (fn) {
           listeners.push(fn);
+        },
+        /** The changes the server refused because someone changed the same document first: [{ path, at, mine, theirs }]. */
+        conflicts: function () {
+          var c = state().conflicts || {};
+          return Object.keys(c)
+            .sort()
+            .map(function (p) {
+              return Object.assign({ path: p }, c[p]);
+            });
+        },
+        /** Forgets a conflict once the person chose (keeping their version is a new change made through NT.repo first). */
+        resolveConflict: function (path) {
+          var s = state();
+          delete s.conflicts[path];
+          NT.log.info("sync.conflict_resolved", { collection: NT.rows.collectionOf(path) });
+          return saveState(s).then(function () {
+            listeners.slice().forEach(function (fn) {
+              fn(status());
+            });
+          });
         },
         failedPaths: function () {
           var s = state();

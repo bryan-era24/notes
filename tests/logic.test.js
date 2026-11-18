@@ -380,3 +380,22 @@ test("[TC-PAG-05-02] the balance line says what is owed, or what is in favour of
   assert.deepEqual(L.balanceLine(0), { kind: "owed", amount: 0 });
   assert.deepEqual(L.balanceLine(-42000), { kind: "credit", amount: 42000 });
 });
+
+test("[TC-SYN-10-05] the differences between two versions list only the fields that changed", () => {
+  assert.deepEqual(L.versionDiff({ name: "Ana", phone: "1", updatedAt: "x" }, { name: "Ana B", phone: "1", updatedAt: "y" }), [
+    "name",
+    "updatedAt",
+  ]);
+  assert.deepEqual(L.versionDiff({ lines: [{ qty: 1 }] }, { lines: [{ qty: 2 }], comment: "" }), ["comment", "lines"]);
+  assert.deepEqual(L.versionDiff({ a: 1 }, { a: 1 }), []);
+});
+
+test("[TC-SYN-10-06] a document changed a few minutes ago by someone else is flagged; my own or older changes are not", () => {
+  const now = "2026-11-17T18:10:00.000Z";
+  const doc = (by, at) => ({ updatedBy: by, updatedAt: at });
+  assert.deepEqual(L.recentChange(doc("luis", "2026-11-17T18:07:00.000Z"), "ana", now, 15), { who: "luis", minutes: 3 });
+  assert.deepEqual(L.recentChange(doc("luis", "2026-11-17T18:09:50.000Z"), "ana", now, 15), { who: "luis", minutes: 0 });
+  assert.equal(L.recentChange(doc("ana", "2026-11-17T18:07:00.000Z"), "ana", now, 15), null);
+  assert.equal(L.recentChange(doc("luis", "2026-11-17T17:00:00.000Z"), "ana", now, 15), null);
+  assert.equal(L.recentChange({}, "ana", now, 15), null);
+});

@@ -16,7 +16,7 @@ NT.app = (function () {
   var esc = NT.print.escape;
   var L = NT.logic;
   var money = L.formatMoney;
-  var VERSION = "1.5.0";
+  var VERSION = "1.6.0";
 
   var store = null,
     backup = null,
@@ -223,6 +223,10 @@ NT.app = (function () {
       if (s.failed && s.state === "idle") text = t("status.failed", { n: s.failed });
       if (s.state !== "idle" && s.state !== "syncing") tone = s.state === "error" ? "error" : "warn";
       if (s.failed && s.state === "idle") tone = "error";
+      if (s.conflicts && s.state === "idle") {
+        text = t(s.conflicts === 1 ? "status.conflictOne" : "status.conflicts", { n: s.conflicts });
+        tone = "warn";
+      }
     }
     if (ui.spaceWarned) {
       text = t("space.status");
@@ -240,6 +244,135 @@ NT.app = (function () {
   function brand() {
     var name = repo ? repo.settings().name : "";
     document.getElementById("brand").textContent = name || t("app.title");
+  }
+
+  /**
+   * Connected mode: says when someone else changed this order or one of its notes in the last minutes, so the person looks before
+   * editing the same thing (decision 0017).
+   */
+  var RECENT_MINUTES = 15;
+  function recentNotice(order, notes) {
+    if (!store.sync) return "";
+    var now = NT.clock.now().toISOString();
+    var me = by();
+    var hit = L.recentChange(order, me, now, RECENT_MINUTES);
+    var what = t("recent.order");
+    (notes || []).forEach(function (n) {
+      var r = L.recentChange(n, me, now, RECENT_MINUTES);
+      if (r && (!hit || r.minutes < hit.minutes)) {
+        hit = r;
+        what = t("recent.note", { n: n.number });
+      }
+    });
+    if (!hit) return "";
+    return (
+      '<p class="notice info">' +
+      esc(
+        hit.minutes < 1
+          ? t("recent.justNow", { who: hit.who, what: what })
+          : t("recent.minutes", { who: hit.who, what: what, n: hit.minutes })
+      ) +
+      "</p>"
+    );
+  }
+
+  // ---------- sync conflicts (decision 0017) ----------
+  /*
+   * When someone else changed the same thing first, the server keeps their version and this device keeps the person's aside. The
+   * banner shows both on every screen until the person chooses: "Usar la mía" saves theirs as a new change (with history);
+   * "Quedarme con la suya" discards theirs, so it takes a second tap.
+   */
+  var SKIP_FIELDS = { updatedAt: 1, updatedBy: 1, customerId: 1, orderId: 1, productId: 1, presentationId: 1, noteId: 1, createdAt: 1 };
+  var FIELD_KEYS = {
+    name: "conflict.field.name",
+    customerName: "conflict.field.customer",
+    deliveryDate: "conflict.field.delivery",
+    comment: "conflict.field.comment",
+    stage: "conflict.field.stage",
+    lines: "conflict.field.lines",
+    presentations: "conflict.field.presentations",
+    phone: "conflict.field.phone",
+    amount: "conflict.field.amount",
+    method: "conflict.field.method",
+    active: "conflict.field.active",
+    deletedAt: "conflict.field.deleted",
+  };
+  function conflictLabel(path, doc) {
+    var c = path.split("/")[0];
+    doc = doc || {};
+    var order = doc.orderId ? store.get("orders/" + doc.orderId) || {} : doc;
+    if (c === "orders") return t("conflict.order", { folio: doc.folio || "" });
+    if (c === "notes") return t("conflict.note", { n: doc.number || "", folio: order.folio || "" });
+    if (c === "payments") return t("conflict.payment", { amount: money(doc.amount || 0), folio: order.folio || "" });
+    if (c === "products") return t("conflict.product", { name: doc.name || "" });
+    if (c === "customers") return t("conflict.customer", { name: doc.name || "" });
+    if (c === "settings") return t("conflict.settings");
+    return t("conflict.other");
+  }
+  function fieldValue(field, v) {
+    if (v === null || v === undefined || v === "") return "—";
+    if (field === "lines")
+      return (v || [])
+        .map(function (l) {
+          return l.qty + " × " + l.productName + " " + l.presentationLabel;
+        })
+        .join(", ");
+    if (field === "presentations")
+      return (v || [])
+        .map(function (p) {
+          return p.label + " " + money(p.price);
+        })
+        .join(", ");
+    if (field === "amount") return money(v);
+    if (field === "deliveryDate") return fmtDate(v);
+    if (field === "stage") return t("stage." + v);
+    if (field === "method") return t("pay.method." + v);
+    if (field === "active") return v ? t("conflict.yes") : t("conflict.no");
+    if (field === "deletedAt") return t("conflict.deletedYes");
+    if (typeof v === "object") return t("conflict.changed");
+    return String(v);
+  }
+  function conflictsBanner() {
+    if (!store || !store.sync || !store.sync.conflicts) return "";
+    var list = store.sync.conflicts();
+    if (!list.length) return "";
+    var html = '<section class="notice warn stack" id="conflicts"><h2>' + esc(t("conflict.title")) + "</h2>";
+    list.forEach(function (c) {
+      var fields = L.versionDiff(c.mine || {}, c.theirs || {}).filter(function (f) {
+        return !SKIP_FIELDS[f];
+      });
+      html +=
+        '<div class="sheet stack conflict"><p><strong>' +
+        esc(conflictLabel(c.path, c.theirs || c.mine)) +
+        "</strong> " +
+        esc(t("conflict.help", { who: (c.theirs && c.theirs.updatedBy) || t("conflict.someone") })) +
+        '</p><table class="compare"><thead><tr><th>' +
+        esc(t("conflict.what")) +
+        "</th><th>" +
+        esc(t("conflict.mine")) +
+        "</th><th>" +
+        esc(t("conflict.theirs")) +
+        "</th></tr></thead><tbody>";
+      fields.forEach(function (f) {
+        html +=
+          "<tr><th>" +
+          esc(FIELD_KEYS[f] ? t(FIELD_KEYS[f]) : t("conflict.field.other")) +
+          "</th><td>" +
+          esc(fieldValue(f, (c.mine || {})[f])) +
+          "</td><td>" +
+          esc(fieldValue(f, (c.theirs || {})[f])) +
+          "</td></tr>";
+      });
+      html +=
+        '</tbody></table><div class="row stretch"><button type="button" class="primary" data-act="conflictMine" data-id="' +
+        esc(c.path) +
+        '">' +
+        esc(t("conflict.useMine")) +
+        "</button>" +
+        confirmButton("conflict:" + c.path, "conflictTheirs", c.path, t("conflict.keepTheirs"), t("conflict.keepTheirsConfirm")) +
+        "</div></div>";
+    });
+    return html + "</section>";
   }
 
   // ---------- routing ----------
@@ -299,7 +432,7 @@ NT.app = (function () {
       default:
         html = ordersView();
     }
-    view.innerHTML = html;
+    view.innerHTML = conflictsBanner() + html;
     document.querySelectorAll(".tabs a").forEach(function (a) {
       if (a.getAttribute("data-tab") === TAB_OF[r.name]) a.setAttribute("aria-current", "page");
       else a.removeAttribute("aria-current");
@@ -984,7 +1117,7 @@ NT.app = (function () {
       return a.paidAt < b.paidAt ? -1 : 1;
     });
     var s = L.orderSummary(notes, pays);
-    var html = '<div class="split"><div class="stack">';
+    var html = recentNotice(order, notes) + '<div class="split"><div class="stack">';
     html +=
       '<article class="pad"><div class="pad-head"><h1>' +
       esc(order.customerName || t("orders.noCustomer")) +
@@ -1121,7 +1254,7 @@ NT.app = (function () {
       );
     }).join("");
   }
-  function confirmButton(key, act, id, label) {
+  function confirmButton(key, act, id, label, confirmLabel) {
     if (ui.confirm === key)
       return (
         '<span class="row"><button type="button" class="danger primary" data-act="' +
@@ -1129,7 +1262,7 @@ NT.app = (function () {
         '" data-id="' +
         esc(id) +
         '">' +
-        esc(t("common.confirmDelete")) +
+        esc(confirmLabel || t("common.confirmDelete")) +
         '</button><button type="button" class="quiet" data-act="confirmNo">' +
         esc(t("common.cancel")) +
         "</button></span>"
@@ -2988,6 +3121,29 @@ NT.app = (function () {
       var x = ui.productForm.presentations[+el.getAttribute("data-i")];
       x.active = !x.active;
       render();
+    },
+    conflictMine: function (el) {
+      var path = el.getAttribute("data-id");
+      var c = store.sync.conflicts().find(function (x) {
+        return x.path === path;
+      });
+      if (!c) return render();
+      repo
+        .useVersion(path, c.mine)
+        .then(function () {
+          return store.sync.resolveConflict(path);
+        })
+        .then(function () {
+          toast(t("conflict.mineSaved"));
+          render();
+        }, failToast);
+    },
+    conflictTheirs: function (el) {
+      ui.confirm = null;
+      store.sync.resolveConflict(el.getAttribute("data-id")).then(function () {
+        toast(t("conflict.theirsKept"));
+        render();
+      }, failToast);
     },
     installHide: function () {
       NT.prefs.set("installHidden", "1");

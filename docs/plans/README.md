@@ -12,6 +12,8 @@ Also done: the same search on Pedidos, Producción, Reportes and Catálogo; auto
 Also done (1.5.0): iPhone fixes (product form, Cambiar cliente/fecha, date field, printing through a PDF), customer drop-down, change
 and credit, PDF files named "cliente folio fecha", archive/delete/merge products, useful diagnostics, install notice and steps.
 
+Also done (1.6.0): sync by version numbers, conflicts shown with both versions, recent-change notice (decision 0017).
+
 Next:
 
 1. Choose the thermal printer; test "Imprimir prueba" with it and adjust js/printers.js / js/escpos.js if needed (LIM-003).
